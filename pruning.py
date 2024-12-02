@@ -157,8 +157,8 @@ def compute_score(root, model, params, branch_lens) -> float:
         score += counts[pattern] * np.log(
             compute_pattern_prob(pattern, root, model, params, branch_lens)
         )
-        print('.', end='')
-    print('done')
+        print(".", end="")
+    print("done")
     return score
 
 
