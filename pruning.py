@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 import argparse
-import itertools
-import os.path
-import subprocess
 import sys
-import tempfile
 from collections import defaultdict
-from functools import reduce
-from typing import Dict, List, Set, Tuple
 
 import numpy as np
 import scipy
 from ete3 import Tree
-from scipy.optimize import LinearConstraint, minimize
+from numba import jit
+from scipy.optimize import minimize
 
 parser = argparse.ArgumentParser(
     description="Compute log likelihood using the pruning algorithm"
@@ -25,6 +20,22 @@ parser.add_argument(
     type=str,
     required=True,
     help="true tree in newick format",
+)
+parser.add_argument(
+    "--method",
+    type=str,
+    default="L-BFGS-B",
+    help="scipy solver",
+    choices=[
+        "Nelder-Mead",
+        "L-BFGS-B",
+        "TNC",
+        "SLSQP",
+        "Powell",
+        "trust-constr",
+        "COBYLA",
+        "COBYQA",
+    ],
 )
 
 if hasattr(sys, "ps1"):
@@ -74,6 +85,7 @@ taxa_indices = dict(map(lambda pair: pair[::-1], enumerate(taxa)))
 # assemble the site pattern count tensor
 counts = defaultdict(lambda: 0)
 for idx in range(nsites):
+    # noinspection PyShadowingNames
     pattern = tuple(
         map(
             lambda taxon: {"A": 0, "C": 1, "G": 2, "T": 3}[
@@ -85,17 +97,18 @@ for idx in range(nsites):
     counts[pattern] += 1
 
 
+# noinspection PyPep8Naming
 def Q_GTR(params) -> np.ndarray:
-    pi = params[:4]
-    x = params[4:]
+    pi = np.abs(params[:4])
+    x = np.abs(params[4:])
     # Julia's
     Q = np.array(
         [
             # fmt: off
-            [           0, pi[1] * x[0], pi[2] * x[1], pi[3] * x[2]],
-            [pi[0] * x[0],            0, pi[2] * x[3], pi[3] * x[4]],
-            [pi[0] * x[1], pi[1] * x[3],            0, pi[3] * x[5]],
-            [pi[0] * x[2], pi[1] * x[4], pi[2] * x[5],            0],
+            [0, pi[1] * x[0], pi[2] * x[1], pi[3] * x[2]],
+            [pi[0] * x[0], 0, pi[2] * x[3], pi[3] * x[4]],
+            [pi[0] * x[1], pi[1] * x[3], 0, pi[3] * x[5]],
+            [pi[0] * x[2], pi[1] * x[4], pi[2] * x[5], 0],
             # fmt: on
         ],
         dtype=np.float64,
@@ -104,10 +117,12 @@ def Q_GTR(params) -> np.ndarray:
     return Q
 
 
+# noinspection PyPep8Naming
 def P(t, model, params) -> np.ndarray:
-    return scipy.linalg.expm(t * model(params))
+    return scipy.linalg.expm(np.abs(t) * model(params))
 
 
+# noinspection PyShadowingNames
 def compute_leaf_vec(node, pattern) -> np.ndarray:
     nuc = pattern[taxa_indices[node.name]]
     e_nuc = np.zeros(4)
@@ -115,50 +130,58 @@ def compute_leaf_vec(node, pattern) -> np.ndarray:
     return e_nuc
 
 
-def compute_pattern_prob_helper(
-    pattern, node, model, params, branch_lens
-) -> np.ndarray:
-
+# noinspection PyShadowingNames
+def compute_pattern_prob_helper(pattern, node, prob_model, branch_lens) -> np.ndarray:
     assert len(node.children) == 2
     left_node, right_node = node.children
 
     if left_node.is_leaf():
         w_l = compute_leaf_vec(left_node, pattern)
     else:
-        w_l = compute_pattern_prob_helper(
-            pattern, left_node, model, params, branch_lens
-        )
+        w_l = compute_pattern_prob_helper(pattern, left_node, prob_model, branch_lens)
 
-    w_l = P(branch_lens[(node.name, left_node.name)], model, params) @ w_l
+    w_l = prob_model(branch_lens[(node.name, left_node.name)]) @ w_l
 
     if right_node.is_leaf():
         w_r = compute_leaf_vec(right_node, pattern)
     else:
-        w_r = compute_pattern_prob_helper(
-            pattern, right_node, model, params, branch_lens
-        )
+        w_r = compute_pattern_prob_helper(pattern, right_node, prob_model, branch_lens)
 
-    w_r = P(branch_lens[(node.name, right_node.name)], model, params) @ w_r
+    w_r = prob_model(branch_lens[(node.name, right_node.name)]) @ w_r
 
     v_n = w_l * w_r
 
     return v_n
 
 
+@jit(nopython=True)
+def prob_model_helper(t, left, right, evals):
+    return ((left * np.exp(t * evals)) @ right).astype(np.float64)
+
+
+# noinspection PyShadowingNames
 def compute_pattern_prob(pattern, root, model, params, branch_lens) -> float:
-    v_r = compute_pattern_prob_helper(pattern, root, model, params, branch_lens)
+    Q = model(params)
+    evals, evecs = np.linalg.eig(Q)
+    left = evecs
+    right = np.linalg.pinv(evecs)
+
+    def prob_model(t):
+        return prob_model_helper(np.abs(t), left, right, evals)
+
+    v_r = compute_pattern_prob_helper(pattern, root, prob_model, branch_lens)
     pi = params[:4]
     return v_r @ pi
 
 
 def compute_score(root, model, params, branch_lens) -> float:
     score = np.float64(0.0)
+    # noinspection PyShadowingNames
     for pattern in counts.keys():
         score += counts[pattern] * np.log(
             compute_pattern_prob(pattern, root, model, params, branch_lens)
         )
-        print(".", end="")
-    print("done")
+    print(".", end="", flush=True)
     return score
 
 
@@ -166,7 +189,6 @@ tree = true_tree.copy()
 
 
 def find_branch_lens(bl, parent, child, parent_name=None, child_name="_i1"):
-
     if parent is not None:
         if parent.name is not None and len(parent.name) > 0:
             parent_name = parent.name
@@ -181,6 +203,7 @@ def find_branch_lens(bl, parent, child, parent_name=None, child_name="_i1"):
     if child.is_leaf():
         return
 
+    # noinspection PyShadowingNames
     for idx, grandchild in enumerate(child.children):
         grandchild_name = "_i" + str(2 * int(child_name[2:]) + idx)
 
@@ -203,12 +226,12 @@ true_params = np.concatenate(
     axis=0,
 )
 
-
 compute_pattern_prob(
     list(counts.items())[0][0], tree, Q_GTR, true_params, true_branch_lens
 )
 
 
+# noinspection PyShadowingNames
 def make_objective(tree, model, edges, pis):
     def _objective(vec):
         params = np.concatenate((pis, vec[:6]), axis=0)
@@ -223,21 +246,18 @@ def make_objective(tree, model, edges, pis):
 pis = np.array([0.25, 0.25, 0.25, 0.25])
 objective = make_objective(tree, Q_GTR, sorted(true_branch_lens.keys()), pis)
 
-
 dimension = 6 + len(true_branch_lens)
-# non_negativity = LinearConstraint(
-#     np.identity(dimension), np.zeros(dimension), np.full(dimension, np.inf)
-# )
-non_negativity = LinearConstraint(
-    np.identity(dimension), np.full(dimension, 1e-6), np.full(dimension, 1e3)
-)
-
 
 x0 = np.abs(np.random.normal(size=dimension))
+# noinspection PyTypeChecker
 res = minimize(
     objective,
     x0,
-    method="trust-constr",
-    constraints=[non_negativity],
+    method=opt.method,
+    bounds=[(0.0, np.inf)] * dimension,
     options={"verbose": 1},
 )
+
+print(res)
+
+# for k in res.keys()
