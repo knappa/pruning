@@ -7,9 +7,9 @@ QGTR <- matrix(c(
   1.75, 0.4950, 0.2400, -2.485), nrow = 4, byrow = T)
 
 pi <- c(0.35, 0.15, 0.15, 0.35)
-m <- -(diag(QGTR) %*% pi)
+m <- -(diag(QGTR) %*% pi)[1,1]
 
-QGTR <- (1 / m) * QGTR
+QGTR <- (1/m) * QGTR
 
 S <- cbind(QGTR[, 1] / pi[1], QGTR[, 2] / pi[2], QGTR[, 3] / pi[3], QGTR[, 4] / pi[4])
 
