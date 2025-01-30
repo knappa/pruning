@@ -546,7 +546,7 @@ def compute_score(
     *, root, prob_model, tree_distances, patterns, pattern_counts
 ) -> float:
     v = compute_score_helper(root, prob_model, tree_distances, patterns)
-    return pattern_counts @ np.nan_to_num(np.log(v @ pis))
+    return pattern_counts @ np.nan_to_num(np.log(1e-16 + np.abs(v @ pis)))
 
 
 def neg_log_likelihood(gtr_params, tree_distances):
