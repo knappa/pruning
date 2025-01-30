@@ -3,6 +3,7 @@ import argparse
 import itertools
 import sys
 from collections import defaultdict
+from contextlib import redirect_stdout
 from typing import List, Tuple
 
 import numpy as np
@@ -48,6 +49,7 @@ parser.add_argument(
     ],
 )
 parser.add_argument("--output", type=str, help="output filename prefix for tree")
+parser.add_argument("--log")
 
 if hasattr(sys, "ps1"):
     opt = parser.parse_args(
@@ -55,11 +57,13 @@ if hasattr(sys, "ps1"):
         # "--tree /home/knappa/build-algo/data/1K-ultrametric/trees_50_taxa_ultrametric_1.nwk".split()
         # "--seqs /home/knappa/build-algo/data/100K-ultrametric/data_1_GTR_I_Gamma_100K_sites_ultrametric.phy "
         # "--tree /home/knappa/build-algo/data/100K-ultrametric/trees_50_taxa_ultrametric_1.nwk".split()
-        "--seqs /home/knappa/test_100K.phy --tree /home/knappa/test.nwk".split()
+        "--seqs /home/knappa/test_100K.phy --tree /home/knappa/test.nwk --log".split()
     )
 else:
     opt = parser.parse_args()
-print(opt)
+
+if opt.log:
+    print(opt)
 
 
 ################################################################################
@@ -332,7 +336,7 @@ res = minimize(
     objective,
     np.ones(num_tree_nodes, dtype=np.float64),
     bounds=[(0.0, 0.0)] + [(0.0, None)] * (num_tree_nodes - 1),
-    callback=callback_param,
+    callback=callback_param if opt.log else None,
 )
 
 if not res.success:
@@ -431,10 +435,17 @@ res = minimize(
     method=opt.method,
     bounds=[(0.0, np.inf)] * 6,
     callback=(
-        callback_ir if opt.method not in {"TNC", "SLSQP", "COBYLA"} else callback_param
+        (
+            callback_ir
+            if opt.method not in {"TNC", "SLSQP", "COBYLA"}
+            else callback_param
+        )
+        if opt.log
+        else None
     ),
 )
-print(res)
+if opt.log:
+    print(res)
 
 
 s_est = res.x / (rate_constraint_matrix @ res.x)
@@ -566,53 +577,52 @@ def full_objective(params, gt_norm=False):
     )
 
 
+num_func_evals = 0
 res = minimize(
     full_objective,
     np.concatenate((s_est, tree_distances)),
     method=opt.method,
     bounds=[(0.0, np.inf)] * (6 + 2 * len(taxa) - 1),
     callback=(
-        callback_ir if opt.method not in {"TNC", "SLSQP", "COBYLA"} else callback_param
+        (
+            callback_ir
+            if opt.method not in {"TNC", "SLSQP", "COBYLA"}
+            else callback_param
+        )
+        if opt.log
+        else None
     ),
 )
-print(res)
+if opt.log:
+    print(res)
 
 s_est = res.x[:6] / (rate_constraint_matrix @ res.x[:6])  # fine tune mu
 tree_distances = res.x[6:]
 
 ################################################################################
-# update branch lens and write tree
+# update branch lens
 
 
 for idx, node in enumerate(true_tree.traverse()):
     node.dist = tree_distances[idx]
 
+################################################################################
+# write tree and statistics to stdout or a file, depending up command line opts
+
+
 newick_rep = true_tree.write(format=5)
 
-if hasattr(opt, "output") and opt.output is not None:
-    with open(opt.output + "+.nwk", "w") as file:
-        file.write(newick_rep)
-        file.write("\n")
 
-    with open(opt.output + "+.csv", "w") as file:
-        for s, v in zip(["s_ac", "s_ag", "s_at", "s_cg", "s_ct", "s_gt"], s_est):
-            file.write(f"{s}: {v:8.5f}\n")
-        file.write("\n")
-
-        file.write("Q:\n")
-        q_est = (A_GTR @ s_est).reshape(4, 4)
-        for row in q_est:
-            file.write(" [")
-            for val in row:
-                file.write(f" {val:8.5f}")
-            file.write(" ]\n")
-
-else:
-    print(newick_rep)
+def print_stats():
+    print(f"neg log likelihood: {-res.fun}")
     print()
 
     for s, v in zip(["s_ac", "s_ag", "s_at", "s_cg", "s_ct", "s_gt"], s_est):
-        print(f"{s}: {v:8.5f}")
+        print(f"{s}: {v}")
+    print()
+
+    for p, v in zip(["pi_a", "pi_c", "pi_g", "pi_t"], pis):
+        print(f"{p}: {v}")
     print()
 
     print("Q:")
@@ -622,6 +632,45 @@ else:
         for val in row:
             print(f" {val:8.5f}", end="")
         print(" ]")
+    print()
+
+    print("tree dist stats:")
+    print(f"min internal branch dist: {np.min(tree_distances[1:])}")
+    print(f"max internal branch dist: {np.max(tree_distances[1:])}")
+    print(f"mean internal branch dist: {np.mean(tree_distances[1:])}")
+    print(f"stdev internal branch dist: {np.std(tree_distances[1:])}")
+    print()
+
+    print("tree dist error stats:")
+    abs_error = np.abs(tree_distances[1:] - true_branch_lens[1:])
+    print(f"min abs error: {np.min(abs_error)}")
+    print(f"max abs error: {np.max(abs_error)}")
+    print(f"mean abs error: {np.mean(abs_error)}")
+    print(f"stdev abs error: {np.std(abs_error)}")
+    rel_mask = (tree_distances > 0) & (true_branch_lens > 0)
+    rel_error = (
+        tree_distances[rel_mask] - true_branch_lens[rel_mask]
+    ) / true_branch_lens[rel_mask]
+    print(f"min rel error: {np.min(rel_error)}")
+    print(f"max rel error: {np.max(rel_error)}")
+    print(f"mean rel error: {np.mean(rel_error)}")
+    print(f"stdev rel error: {np.std(rel_error)}")
+
+
+if hasattr(opt, "output") and opt.output is not None:
+    with open(opt.output + ".nwk", "w") as file:
+        file.write(newick_rep)
+        file.write("\n")
+
+    with open(opt.output + ".log", "w") as file:
+        with redirect_stdout(file):
+            print_stats()
+
+else:
+    print(newick_rep)
+    print()
+    print_stats()
+
 
 ################################################################################
 ################################################################################
