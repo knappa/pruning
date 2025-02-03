@@ -13,6 +13,16 @@ from numba import jit
 from scipy.optimize import OptimizeResult, minimize
 from scipy.special import xlogy
 
+from matrices import (
+    V,
+    make_A_GTR,
+    make_A_GTR16v,
+    make_A_GTR_unph,
+    make_rate_constraint_matrix,
+    make_rate_constraint_matrix_gtr16,
+    make_rate_constraint_matrix_gtr16v,
+)
+
 parser = argparse.ArgumentParser(
     description="Compute log likelihood using the pruning algorithm"
 )
@@ -57,7 +67,7 @@ if hasattr(sys, "ps1"):
         # "--tree /home/knappa/build-algo/data/1K-ultrametric/trees_50_taxa_ultrametric_1.nwk".split()
         # "--seqs /home/knappa/build-algo/data/100K-ultrametric/data_1_GTR_I_Gamma_100K_sites_ultrametric.phy "
         # "--tree /home/knappa/build-algo/data/100K-ultrametric/trees_50_taxa_ultrametric_1.nwk".split()
-        "--seqs /home/knappa/test_100K.phy --tree /home/knappa/test.nwk --log".split()
+        "--seqs /home/knappa/test_100K.phy --tree /home/knappa/test.nwk --log 0".split()
     )
 else:
     opt = parser.parse_args()
@@ -100,15 +110,6 @@ def callback_ir(intermediate_result: OptimizeResult):
     np_full_print(intermediate_result.x)
 
 
-def callback_annealing(x, f, context):
-    global num_func_evals
-    num_func_evals += 1
-    print(num_func_evals, flush=True)
-    np_full_print(x)
-    np_full_print(f)
-    np_full_print(context)
-
-
 ################################################################################
 # read the true tree
 
@@ -131,35 +132,45 @@ node_indices = {
 # read the sequence data and compute nucleotide frequencies
 
 nuc_to_idx = {"A": 0, "C": 1, "G": 2, "T": 3}
-freq_counts = np.zeros(4, dtype=np.int64)
+base_freq_counts = np.zeros(4, dtype=np.int64)
 
 if opt.model == "DNA":
+    n_states = 4
     with open(opt.seqs, "r") as seq_file:
+        # first line consists of counts
         ntaxa, nsites = map(int, next(seq_file).split())
+        # parse sequences
         sequences = dict()
         for line in seq_file:
             taxon, *seq = line.strip().split()
             seq = "".join(seq).upper()
             seq = np.array([nuc_to_idx[nuc] for nuc in seq], dtype=np.uint8)
+            # compute nucleotide frequency
             for nuc_idx in seq:
-                freq_counts[nuc_idx] += 1
+                base_freq_counts[nuc_idx] += 1
             assert taxon not in sequences
             sequences[taxon] = seq
         assert ntaxa == len(sequences)
 elif opt.model == "PHASED_DNA":
+    n_states = 16
     with open(opt.seqs, "r") as seq_file:
+        # first line consists of counts
         ntaxa, nsites = map(int, next(seq_file).split())
+        # parse sequences
         sequences = dict()
         for line in seq_file:
             taxon, *seq = line.strip().split()
             seq = list(map(lambda s: s.upper(), seq))
             assert all(len(s) == 2 for s in seq)
+            # compute nucleotide frequency
             for nuc_a, nuc_b in seq:
-                freq_counts[nuc_to_idx[nuc_a]] += 1
-                freq_counts[nuc_to_idx[nuc_b]] += 1
+                base_freq_counts[nuc_to_idx[nuc_a]] += 1
+                base_freq_counts[nuc_to_idx[nuc_b]] += 1
+            # sequence coding is lexicographic AA, AC, AG, AT, CA, ...
+            # which is equivalent to a base-4 encoding 00=0, 01=1, 02=2, 03=3, 10=4, ...
             seq = np.array(
                 [
-                    nuc_to_idx[nuc[1]] * 4 + nuc_to_idx[nuc[0]]
+                    nuc_to_idx[nuc[0]] * 4 + nuc_to_idx[nuc[1]]
                     for nuc in map(lambda s: s.upper(), seq)
                 ],
                 dtype=np.uint8,
@@ -168,6 +179,8 @@ elif opt.model == "PHASED_DNA":
             sequences[taxon] = seq
         assert ntaxa == len(sequences)
 elif opt.model == "UNPHASED_DNA":
+    n_states = 10
+    # custom sequence encoding TODO: confer with Julia on desired order
     unphased_nuc_to_idx = {
         "AA": 0,
         "CC": 1,
@@ -188,8 +201,8 @@ elif opt.model == "UNPHASED_DNA":
             seq = list(map(lambda s: s.upper(), seq))
             assert all(len(s) == 2 for s in seq)
             for nuc_a, nuc_b in seq:
-                freq_counts[nuc_to_idx[nuc_a]] += 1
-                freq_counts[nuc_to_idx[nuc_b]] += 1
+                base_freq_counts[nuc_to_idx[nuc_a]] += 1
+                base_freq_counts[nuc_to_idx[nuc_b]] += 1
             seq = np.array(
                 [unphased_nuc_to_idx[nuc] for nuc in seq],
                 dtype=np.uint8,
@@ -200,20 +213,21 @@ elif opt.model == "UNPHASED_DNA":
 
     pass
 else:
-    assert False, "Invalid model"
+    assert False, "Unknown model selection"
 
-pis = freq_counts / np.sum(freq_counts)
+pis = base_freq_counts / np.sum(base_freq_counts)
 pi_a, pi_c, pi_g, pi_t = pis
+pis16 = np.kron(pis, pis)
+pis10 = pis16 @ V
 
-assert (
-    set(true_tree.get_leaf_names()) == sequences.keys()
+assert set(true_tree.get_leaf_names()) == set(
+    sequences.keys()
 ), "not the same leaves! are these matching datasets?"
-
 
 taxa = sorted(sequences.keys())
 taxa_indices = dict(map(lambda pair_: pair_[::-1], enumerate(taxa)))
 
-# assemble the site pattern count tensor
+# assemble the site pattern count tensor (sparse)
 counts = defaultdict(lambda: 0)
 for idx in range(nsites):
     # noinspection PyShadowingNames
@@ -225,37 +239,195 @@ for idx in range(nsites):
     )
     counts[pattern] += 1
 
-
 ################################################################################
 # initial estimates for branch lengths based on F81 distances
 
-assert opt.model == "DNA", "Nothing below this line is adapted to any other model"
 
+match opt.model:
+    case "DNA":
 
-def sequence_distance(seq1: np.ndarray, seq2: np.ndarray) -> float:
-    """
-    F81 distance, a generalization of the JC69 distance, which takes into account nucleotide frequencies
-    :param seq1: a sequence
-    :param seq2: a sequence
-    :return: F81 distance
-    """
-    #
-    beta = 1 / (1 - np.sum(pis**2))  # 1/mu
-    disagreement = np.sum(seq1 != seq2) / len(seq1)
-    return -np.log(1 - beta * np.minimum(1 / beta - 1e-10, disagreement)) / beta
+        def sequence_distance(
+            seq1: np.ndarray, seq2: np.ndarray
+        ) -> Tuple[float, float]:
+            """
+            F81 distance, a generalization of the JC69 distance, which takes into account nucleotide frequencies
+            :param seq1: a sequence
+            :param seq2: a sequence
+            :return: F81 distance, variance of distance * sequence length
+            """
+            #
+            beta = 1 / (1 - np.sum(pis**2))
+            disagreement = np.sum(seq1 != seq2) / len(seq1)
+            return (
+                -np.log(np.maximum(1e-10, 1 - beta * disagreement)) / beta,
+                # np.maximum(1e-10, (1 - disagreement) * disagreement)
+                # / np.maximum(1e-10, (beta * disagreement - 1) ** 2),
+                np.clip(
+                    np.nan_to_num(
+                        (1 - disagreement)
+                        * disagreement
+                        / (beta * disagreement - 1) ** 2
+                    ),
+                    1,
+                    1_000,
+                ),
+            )
 
+    case "PHASED_DNA":
+
+        def sequence_distance(
+            seq1: np.ndarray, seq2: np.ndarray
+        ) -> Tuple[float, float]:
+            """
+            F81-16 distance, a generalization of the JC69 distance, which takes into account nucleotide frequencies
+            :param seq1: a sequence
+            :param seq2: a sequence
+            :return: F81-16 distance, variance of distance * sequence length
+            """
+            #
+            beta = 1 / (2 * (1 - np.sum(pis**2)))
+            disagreement = np.sum(seq1 != seq2) / len(seq1)
+            return (
+                -np.log(
+                    np.maximum(
+                        1e-10, 1 - 2 * beta + 2 * beta * np.sqrt(1 - disagreement)
+                    ),
+                )
+                / beta,
+                np.clip(
+                    np.nan_to_num(
+                        disagreement
+                        / (2 * beta * np.sqrt(1 - disagreement) - 2 * beta + 1) ** 2
+                    ),
+                    1,
+                    1_000,
+                ),
+            )
+
+    case "UNPHASED_DNA":
+
+        def sequence_distance(
+            seq1: np.ndarray, seq2: np.ndarray
+        ) -> Tuple[float, float]:
+            """
+            F81-10 distance, a generalization of the JC69 distance, which takes into account nucleotide frequencies
+            :param seq1: a sequence
+            :param seq2: a sequence
+            :return: F81-10 distance
+            """
+            #
+            beta = 1 / (2 * (1 - np.sum(pis**2)))
+            zeta = np.sum([np.prod(pis[np.arange(4) != idx]) for idx in range(4)])
+            eta = np.prod(pis)
+            disagreement = np.sum(seq1 != seq2) / len(seq1)
+            return (
+                -np.log(
+                    np.maximum(
+                        1e-10,
+                        (
+                            32 * beta**2 * (eta - zeta)
+                            - 4 * beta
+                            - 3
+                            + beta
+                            * np.sqrt(8)
+                            * np.sqrt(
+                                2 + disagreement * (32 * beta**2 * (zeta - eta) + 3)
+                            )
+                        )
+                        / (
+                            32 * beta**2 * (eta - zeta)
+                            - 8 * beta
+                            + 3
+                            - 8 * beta**2 * disagreement
+                        ),
+                    )
+                ),
+                np.clip(
+                    np.nan_to_num(
+                        -(
+                            (
+                                32 * beta**2 * (eta - zeta)
+                                - 8 * beta**2 * disagreement
+                                - 8 * beta
+                                + 3
+                            )
+                            ** 2
+                        )
+                        * (
+                            np.sqrt(2)
+                            * (32 * beta**2 * (eta - zeta) - 3)
+                            * beta
+                            / (
+                                (
+                                    32 * beta**2 * (eta - zeta)
+                                    - 8 * beta**2 * disagreement
+                                    - 8 * beta
+                                    + 3
+                                )
+                                * np.sqrt(
+                                    -(32 * beta**2 * (eta - zeta) - 3) * disagreement
+                                    + 2
+                                )
+                            )
+                            - 8
+                            * (
+                                32 * beta**2 * (eta - zeta)
+                                + 2
+                                * np.sqrt(2)
+                                * np.sqrt(
+                                    -(32 * beta**2 * (eta - zeta) - 3) * disagreement
+                                    + 2
+                                )
+                                * beta
+                                - 4 * beta
+                                - 3
+                            )
+                            * beta**2
+                            / (
+                                32 * beta**2 * (eta - zeta)
+                                - 8 * beta**2 * disagreement
+                                - 8 * beta
+                                + 3
+                            )
+                            ** 2
+                        )
+                        ** 2
+                        * (disagreement - 1)
+                        * disagreement
+                        / (
+                            32 * beta**2 * (eta - zeta)
+                            + 2
+                            * np.sqrt(2)
+                            * np.sqrt(
+                                -(32 * beta**2 * (eta - zeta) - 3) * disagreement + 2
+                            )
+                            * beta
+                            - 4 * beta
+                            - 3
+                        )
+                        ** 2
+                    ),
+                    1,
+                    1_000,
+                ),
+            )
+
+    case _:
+        assert False
 
 # Compute all pairwise leaf distances
 pair_to_idx = {
     (n1, n2) if n1 < n2 else (n2, n1): idx
     for idx, (n1, n2) in enumerate(itertools.combinations(taxa, 2))
 }
-leaf_distances = np.array(
+leaf_stats = np.array(
     [
         sequence_distance(sequences[n1], sequences[n2])
         for n1, n2 in itertools.combinations(taxa, 2)
     ]
 )
+leaf_distances = leaf_stats[:, 0]
+leaf_vars = leaf_stats[:, 1]
 
 
 def complete_paths_forward(node, incoming_paths):
@@ -282,7 +454,7 @@ def complete_paths_backward(node, incoming_paths):
         ) + complete_paths_backward(right_child, extended_paths)
 
 
-def get_paths(node) -> List[List[str]]:
+def get_paths(node, is_root=True) -> List[List[str]]:
     # get all paths that go through node (as it's maximal tree node)
     if node.is_leaf():
         return []
@@ -290,11 +462,14 @@ def get_paths(node) -> List[List[str]]:
     left_child, right_child = node.children
 
     # get paths that stay to the left and right of this node
-    left_paths = get_paths(left_child)
-    right_paths = get_paths(right_child)
+    left_paths = get_paths(left_child, is_root=False)
+    right_paths = get_paths(right_child, is_root=False)
 
     # get paths that pass directly through this node
-    through_paths = complete_paths_forward(right_child, [[node.name]])
+    if is_root:
+        through_paths = complete_paths_forward(right_child, [[]])
+    else:
+        through_paths = complete_paths_forward(right_child, [[node.name]])
     through_paths = complete_paths_backward(left_child, through_paths)
 
     return left_paths + through_paths + right_paths
@@ -328,14 +503,14 @@ constraints_val = np.array(constraints_val)
 
 def objective(x):
     prediction_err = constraints_eqn @ x - constraints_val
-    return np.mean(x**2) + np.mean(prediction_err**2)
+    return np.mean(x**2) + np.mean(prediction_err**2 / np.concatenate(([1], leaf_vars)))
 
 
 num_func_evals = 0
 res = minimize(
     objective,
     np.ones(num_tree_nodes, dtype=np.float64),
-    bounds=[(0.0, 0.0)] + [(0.0, None)] * (num_tree_nodes - 1),
+    bounds=[(0.0, None)] * num_tree_nodes,
     callback=callback_param if opt.log else None,
 )
 
@@ -351,6 +526,9 @@ true_branch_lens = np.zeros(num_tree_nodes, dtype=np.float64)
 for node in true_tree.traverse():
     true_branch_lens[node_indices[node.name]] = node.dist
 
+assert opt.model == "DNA", "Nothing below this line is adapted to any other model"
+
+
 ################################################################################
 # initial estimates for GTR parameters
 
@@ -362,75 +540,113 @@ for idx, (tx1, tx2) in enumerate(itertools.combinations(taxa, 2)):
 count_patterns /= np.sum(count_patterns, axis=(1, 2))[:, None, None]
 reduced_pattern = np.sum(count_patterns, axis=2)
 
+match opt.model:
+    case "DNA":
+        A_GTR = make_A_GTR(pis)
+        rate_constraint_matrix = make_rate_constraint_matrix(pis)
 
-A_GTR = np.array(
-    [
-        # fmt: off
-        #  s_ac   s_ag   s_at   s_cg   s_ct   s_gt
-        # row 1
-        [ -pi_c, -pi_g, -pi_t,     0,     0,     0],
-        [  pi_c,     0,     0,     0,     0,     0],
-        [     0,  pi_g,     0,     0,     0,     0],
-        [     0,     0,  pi_t,     0,     0,     0],
-        # row 2
-        [  pi_a,     0,     0,     0,     0,     0],
-        [ -pi_a,     0,     0, -pi_g, -pi_t,     0],
-        [     0,     0,     0,  pi_g,     0,     0],
-        [     0,     0,     0,     0,  pi_t,     0],
-        # row 3
-        [     0,  pi_a,     0,     0,     0,     0],
-        [     0,     0,     0,  pi_c,     0,     0],
-        [     0, -pi_a,     0, -pi_c,     0, -pi_t],
-        [     0,     0,     0,     0,     0,  pi_t],
-        # row 4
-        [     0,     0,  pi_a,     0,     0,     0],
-        [     0,     0,     0,     0,  pi_c,     0],
-        [     0,     0,     0,     0,     0,  pi_g],
-        [     0,     0, -pi_a,     0, -pi_c, -pi_g],
-        # fmt: on
-    ]
-)
-
-rate_constraint_matrix = np.array(
-    [
-        2 * pi_a * pi_c,
-        2 * pi_a * pi_g,
-        2 * pi_a * pi_t,
-        2 * pi_c * pi_g,
-        2 * pi_c * pi_t,
-        2 * pi_g * pi_t,
-    ]
-)
-
-
-def initial_gtr_param_objective(s_est, leaf_to_leaf_distances):
-    p_ts = scipy.linalg.expm(
-        leaf_to_leaf_distances[:, None, None]
-        * (A_GTR @ s_est).reshape(4, 4)[None, :, :]
-    )
-    joint_dist = reduced_pattern[:, :, None] * p_ts
-    # compute KL divergence plus rate constraint
-    return (
-        np.mean(
-            np.sum(
-                np.maximum(
-                    np.nan_to_num(xlogy(count_patterns, count_patterns), neginf=-1e5),
-                    -1e5,
-                )
-                - np.maximum(
-                    np.nan_to_num(xlogy(count_patterns, joint_dist), neginf=-1e5), -1e5
-                ),
-                axis=(1, 2),
+        def initial_param_objective(s_est, leaf_to_leaf_distances):
+            p_ts = scipy.linalg.expm(
+                leaf_to_leaf_distances[:, None, None]
+                * (A_GTR @ s_est).reshape(4, 4)[None, :, :]
             )
-        )
-        + (rate_constraint_matrix @ s_est - 1) ** 2
-    )
+            joint_dist = reduced_pattern[:, :, None] * p_ts
+            # compute KL divergence plus rate constraint
+            return (
+                np.mean(
+                    np.sum(
+                        np.maximum(
+                            np.nan_to_num(
+                                xlogy(count_patterns, count_patterns), neginf=-1e5
+                            ),
+                            -1e5,
+                        )
+                        - np.maximum(
+                            np.nan_to_num(
+                                xlogy(count_patterns, joint_dist), neginf=-1e5
+                            ),
+                            -1e5,
+                        ),
+                        axis=(1, 2),
+                    )
+                )
+                + (rate_constraint_matrix @ s_est - 1) ** 2
+            )
 
+    case "PHASED_DNA":
+        A_GTR16 = make_A_GTR16v(pis)
+        rate_constraint_matrix = make_rate_constraint_matrix_gtr16v(pis)
+
+        def initial_param_objective(s_est, leaf_to_leaf_distances):
+            p_ts = scipy.linalg.expm(
+                leaf_to_leaf_distances[:, None, None]
+                * (A_GTR16 @ s_est).reshape(16, 16)[None, :, :]
+            )
+            joint_dist = reduced_pattern[:, :, None] * p_ts
+            # compute KL divergence plus rate constraint
+            return (
+                np.mean(
+                    np.sum(
+                        np.maximum(
+                            np.nan_to_num(
+                                xlogy(count_patterns, count_patterns), neginf=-1e5
+                            ),
+                            -1e5,
+                        )
+                        - np.maximum(
+                            np.nan_to_num(
+                                xlogy(count_patterns, joint_dist), neginf=-1e5
+                            ),
+                            -1e5,
+                        ),
+                        axis=(1, 2),
+                    )
+                )
+                + (rate_constraint_matrix @ s_est - 1) ** 2
+            )
+
+    case "UNPHASED_DNA":
+        A_GTR_UNPH = make_A_GTR_unph(pis)
+        rate_constraint_matrix = make_rate_constraint_matrix_gtr16(pis)
+
+        def initial_param_objective(s_est, leaf_to_leaf_distances):
+            p_ts = scipy.linalg.expm(
+                leaf_to_leaf_distances[:, None, None]
+                * (A_GTR_UNPH @ s_est).reshape(10, 10)[None, :, :]
+            )
+            joint_dist = reduced_pattern[:, :, None] * p_ts
+            # compute KL divergence plus rate constraint
+            return (
+                np.mean(
+                    np.sum(
+                        np.maximum(
+                            np.nan_to_num(
+                                xlogy(count_patterns, count_patterns), neginf=-1e5
+                            ),
+                            -1e5,
+                        )
+                        - np.maximum(
+                            np.nan_to_num(
+                                xlogy(count_patterns, joint_dist), neginf=-1e5
+                            ),
+                            -1e5,
+                        ),
+                        axis=(1, 2),
+                    )
+                )
+                + (rate_constraint_matrix @ s_est - 1) ** 2
+            )
+
+        pass
+    case _:
+        assert False
 
 num_func_evals = 0
 res = minimize(
-    initial_gtr_param_objective,
-    np.ones(6),  # initial guess: F81 model (all s parameters == 1)
+    initial_param_objective,
+    (
+        np.ones(6) if opt.model in ["DNA", "UNPHASED_DNA"] else np.ones(12)
+    ),  # initial guess: F81 model (all s parameters == 1)
     args=constraints_eqn[1:] @ tree_distances,
     method=opt.method,
     bounds=[(0.0, np.inf)] * 6,
@@ -447,8 +663,8 @@ res = minimize(
 if opt.log:
     print(res)
 
-
 s_est = res.x / (rate_constraint_matrix @ res.x)
+
 
 ################################################################################
 # jointly optimize GTR params and branch lens using neg-log likelihood
@@ -670,7 +886,6 @@ else:
     print(newick_rep)
     print()
     print_stats()
-
 
 ################################################################################
 ################################################################################
