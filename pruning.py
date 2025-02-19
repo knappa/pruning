@@ -4,6 +4,8 @@ import itertools
 import sys
 from collections import defaultdict
 from contextlib import redirect_stdout
+from functools import reduce
+from operator import mul
 from typing import List, Tuple
 
 import numpy as np
@@ -695,10 +697,10 @@ def neg_log_likelihood_unphased(gtr_params, tree_distances):
     gtr_prob_model = make_GTR_prob_model(np.concatenate((pis, gtr_params)))
 
     unphased_idx_to_phased_idcs = {
-        0: (0, 0),  # "AA"
-        1: (1, 1),  # "CC"
-        2: (2, 2),  # "GG"
-        3: (3, 3),  # "TT"
+        0: (0,),  # "AA"
+        1: (1,),  # "CC"
+        2: (2,),  # "GG"
+        3: (3,),  # "TT"
         4: (0, 1),  # "AC"
         5: (0, 2),  # "AG"
         6: (0, 3),  # "AT"
@@ -707,12 +709,11 @@ def neg_log_likelihood_unphased(gtr_params, tree_distances):
         9: (2, 3),  # "GT"
     }
     genotype_counts = defaultdict(lambda: 0.0)
-    # TODO: optimize
     for pattern, count in counts.keys():
-        for resolved_pattern in itertools.product(
-            *(unphased_idx_to_phased_idcs[idx] for idx in pattern)
-        ):
-            genotype_counts[resolved_pattern] += 0.5 ** len(pattern)
+        pattern_options = [unphased_idx_to_phased_idcs[idx] for idx in pattern]
+        weight = 0.5 ** reduce(mul, map(len, pattern_options), 1)
+        for resolved_pattern in itertools.product(*pattern_options):
+            genotype_counts[resolved_pattern] += weight
 
     patterns = np.array([pattern for pattern in genotype_counts.keys()])
     pattern_counts = np.array([count for count in genotype_counts.values()])
