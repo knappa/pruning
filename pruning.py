@@ -6,24 +6,16 @@ from collections import defaultdict
 from contextlib import redirect_stdout
 from functools import reduce
 from operator import mul
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
+import numba
 import numpy as np
 import scipy
 from ete3 import Tree
-from numba import jit
 from scipy.optimize import OptimizeResult, minimize
 from scipy.special import xlogy
 
-from matrices import (
-    V,
-    make_A_GTR,
-    make_A_GTR16v,
-    make_A_GTR_unph,
-    make_rate_constraint_matrix,
-    make_rate_constraint_matrix_gtr16,
-    make_rate_constraint_matrix_gtr16v,
-)
+from matrices import V, make_A_GTR, make_A_GTR16v, make_A_GTR_unph, make_rate_constraint_matrix
 
 parser = argparse.ArgumentParser(description="Compute log likelihood using the pruning algorithm")
 parser.add_argument("--seqs", type=str, required=True, help="sequence alignments in phylip format")
@@ -491,70 +483,72 @@ for node in true_tree.traverse():
     true_branch_lens[node_indices[node.name]] = node.dist
 
 ################################################################################
+# set rate constraint matrices
+
+A_GTR = make_A_GTR(pis)
+A_GTR16 = make_A_GTR16v(pis)
+A_GTR_UNPH = make_A_GTR_unph(pis)
+
+rate_constraint_matrix = make_rate_constraint_matrix(pis)
+
+################################################################################
 # initial estimates for GTR parameters
 
-# compute count pattern matrices
-count_patterns = np.zeros((len(taxa) * (len(taxa) - 1) // 2, 4, 4))
-for idx, (tx1, tx2) in enumerate(itertools.combinations(taxa, 2)):
-    for idx1, idx2 in zip(sequences[tx1], sequences[tx2]):
-        count_patterns[idx, idx1, idx2] += 1
-count_patterns /= np.sum(count_patterns, axis=(1, 2))[:, None, None]
-reduced_pattern = np.sum(count_patterns, axis=2)
-
-
-def make_initial_param_objective(A, dim, rate_constraint_matrix):
-    def initial_param_objective(s_est, leaf_to_leaf_distances):
-        p_ts = scipy.linalg.expm(
-            leaf_to_leaf_distances[:, None, None] * (A @ s_est).reshape(dim, dim)[None, :, :]
-        )
-        joint_dist = reduced_pattern[:, :, None] * p_ts
-        # compute KL divergence plus rate constraint
-        return (
-            np.mean(
-                np.sum(
-                    np.maximum(
-                        np.nan_to_num(xlogy(count_patterns, count_patterns), neginf=-1e5),
-                        -1e5,
-                    )
-                    - np.maximum(
-                        np.nan_to_num(xlogy(count_patterns, joint_dist), neginf=-1e5),
-                        -1e5,
-                    ),
-                    axis=(1, 2),
-                )
-            )
-            + (rate_constraint_matrix @ s_est - 1) ** 2
-        )
-
-    return initial_param_objective
-
-
-match opt.model:
-    case "DNA":
-        A_GTR = make_A_GTR(pis)
-        rate_constraint_matrix = make_rate_constraint_matrix(pis)
-        initial_param_objective = make_initial_param_objective(
-            A_GTR, n_states, rate_constraint_matrix
-        )
-
-    case "PHASED_DNA":
-        A_GTR16 = make_A_GTR16v(pis)
-        rate_constraint_matrix = make_rate_constraint_matrix_gtr16v(pis)
-        initial_param_objective = make_initial_param_objective(
-            A_GTR16, n_states, rate_constraint_matrix
-        )
-
-    case "UNPHASED_DNA":
-        A_GTR_UNPH = make_A_GTR_unph(pis)
-        rate_constraint_matrix = make_rate_constraint_matrix_gtr16(pis)
-        initial_param_objective = make_initial_param_objective(
-            A_GTR_UNPH, n_states, rate_constraint_matrix
-        )
-
-    case _:
-        assert False
-
 if opt.pre_estimate_params:
+
+    # compute count pattern matrices
+    count_patterns = np.zeros((len(taxa) * (len(taxa) - 1) // 2, 4, 4))
+    for idx, (tx1, tx2) in enumerate(itertools.combinations(taxa, 2)):
+        for idx1, idx2 in zip(sequences[tx1], sequences[tx2]):
+            count_patterns[idx, idx1, idx2] += 1
+    count_patterns /= np.sum(count_patterns, axis=(1, 2))[:, None, None]
+    reduced_pattern = np.sum(count_patterns, axis=2)
+
+    def make_initial_param_objective(A, dim, rate_constraint_matrix):
+        def initial_param_objective(s_est, leaf_to_leaf_distances):
+            p_ts = scipy.linalg.expm(
+                leaf_to_leaf_distances[:, None, None] * (A @ s_est).reshape(dim, dim)[None, :, :]
+            )
+            joint_dist = reduced_pattern[:, :, None] * p_ts
+            # compute KL divergence plus rate constraint
+            return (
+                np.mean(
+                    np.sum(
+                        np.maximum(
+                            np.nan_to_num(xlogy(count_patterns, count_patterns), neginf=-1e5),
+                            -1e5,
+                        )
+                        - np.maximum(
+                            np.nan_to_num(xlogy(count_patterns, joint_dist), neginf=-1e5),
+                            -1e5,
+                        ),
+                        axis=(1, 2),
+                    )
+                )
+                + (rate_constraint_matrix @ s_est - 1) ** 2
+            )
+
+        return initial_param_objective
+
+    match opt.model:
+        case "DNA":
+            initial_param_objective = make_initial_param_objective(
+                A_GTR, n_states, rate_constraint_matrix
+            )
+
+        case "PHASED_DNA":
+            initial_param_objective = make_initial_param_objective(
+                A_GTR16, n_states, rate_constraint_matrix
+            )
+
+        case "UNPHASED_DNA":
+            initial_param_objective = make_initial_param_objective(
+                A_GTR_UNPH, n_states, rate_constraint_matrix
+            )
+
+        case _:
+            assert False
+
     num_func_evals = 0
     res = minimize(
         initial_param_objective,
@@ -582,7 +576,7 @@ else:
 # jointly optimize GTR params and branch lens using neg-log likelihood
 
 
-@jit(nopython=True)
+@numba.jit(nopython=True)
 def prob_model_helper(t, left, right, evals):
     return ((left * np.exp(t * evals)) @ right).astype(np.float64)
 
@@ -637,115 +631,140 @@ def make_GTR_prob_model(gtr_params):
 ################################################################################
 ################################################################################
 
-assert opt.model == "DNA", "Nothing below this line is adapted to any other model"
+
+def compute_leaf_vec(patterns) -> Callable:
+    id4 = np.identity(4, dtype=np.float64)
+    result = np.array([id4[p] for p in patterns], dtype=np.float64)
+
+    # noinspection PyUnusedLocal
+    def local_score_function_terminal(prob_mode, tree_distances):
+        return result
+
+    return numba.jit(local_score_function_terminal, nopython=False, forceobj=True)
 
 
-def compute_leaf_vec(node, patterns) -> np.ndarray:
-    nucs = patterns[:, taxa_indices[node.name]]
-    e_nuc = np.zeros((patterns.shape[0], 4))
-    for idx, nuc in enumerate(nucs):
-        e_nuc[idx, nuc] = 1
-    return e_nuc
-
-
-def compute_score_helper(node, prob_model, tree_distances, patterns) -> np.ndarray:
+def compute_score_function_helper(node, patterns, taxa_indices_) -> Callable:
     assert len(node.children) == 2
     left_node, right_node = node.children
 
-    if left_node.is_leaf():
-        w_l = compute_leaf_vec(left_node, patterns)
-    else:
-        w_l = compute_score_helper(left_node, prob_model, tree_distances, patterns)
+    left_leaves = tuple(map(lambda lf: taxa_indices_[lf.name], left_node.iter_leaves()))
+    right_leaves = tuple(map(lambda lf: taxa_indices_[lf.name], right_node.iter_leaves()))
 
-    t = tree_distances[node_indices[left_node.name]]
-    w_l = np.einsum("ji,nj->ni", prob_model(t), w_l)
+    left_patterns = np.unique(patterns[:, left_leaves], axis=0)
+    right_patterns = np.unique(patterns[:, right_leaves], axis=0)
+
+    left_patterns_lookup = {tuple(pattern): idx for idx, pattern in enumerate(left_patterns)}
+    right_patterns_lookup = {tuple(pattern): idx for idx, pattern in enumerate(right_patterns)}
+
+    # noinspection PyTypeChecker
+    split_patterns_idx = np.array(
+        [
+            [
+                left_patterns_lookup[tuple(pattern[list(left_leaves)])],
+                right_patterns_lookup[tuple(pattern[list(right_leaves)])],
+            ]
+            for pattern in patterns
+        ],
+        dtype=np.int64,
+    )
+
+    if left_node.is_leaf():
+        w_l_function = compute_leaf_vec(left_patterns)
+    else:
+        left_taxa_indices = {l.name: idx for idx, l in enumerate(left_node.iter_leaves())}
+        w_l_function = compute_score_function_helper(left_node, left_patterns, left_taxa_indices)
 
     if right_node.is_leaf():
-        w_r = compute_leaf_vec(right_node, patterns)
+        w_r_function = compute_leaf_vec(right_patterns)
     else:
-        w_r = compute_score_helper(right_node, prob_model, tree_distances, patterns)
+        right_taxa_indices = {l.name: idx for idx, l in enumerate(right_node.iter_leaves())}
+        w_r_function = compute_score_function_helper(right_node, right_patterns, right_taxa_indices)
 
-    t = tree_distances[node_indices[right_node.name]]
-    w_r = np.einsum("ji,nj->ni", prob_model(t), w_r)
+    left_index = node_indices[left_node.name]
+    right_index = node_indices[right_node.name]
 
-    v_n = w_l * w_r
+    def local_score_function_branching(prob_model, tree_distances):
+        w_l = w_l_function(prob_model, tree_distances)
+        w_r = w_r_function(prob_model, tree_distances)
 
-    return v_n
+        p_l = prob_model(tree_distances[left_index])
+        p_r = prob_model(tree_distances[right_index])
+
+        v_n = (w_l[split_patterns_idx[:, 0]] @ p_l) * (w_r[split_patterns_idx[:, 1]] @ p_r)
+
+        return v_n
+
+    return numba.jit(local_score_function_branching, nopython=False, forceobj=True)
 
 
-def compute_score(*, root, prob_model, tree_distances, patterns, pattern_counts) -> float:
-    v = compute_score_helper(root, prob_model, tree_distances, patterns)
-    # print(f"{v=}")
-    return pattern_counts @ np.nan_to_num(np.log(v @ pis))
+def compute_score_function(*, root, patterns, pattern_counts) -> Callable:
+    v_function = compute_score_function_helper(root, patterns, taxa_indices)
+
+    def score_function(prob_model, tree_distances):
+        v = v_function(prob_model, tree_distances)
+        return -(pattern_counts @ np.nan_to_num(np.log(v @ pis)))[0]
+
+    return numba.jit(score_function, nopython=False, forceobj=True)
+
+
+match opt.model:
+    case "DNA":
+        patterns = np.array([pattern for pattern in counts.keys()])
+        pattern_counts = np.array([count for count in counts.values()])
+
+        score_function = compute_score_function(
+            root=true_tree, patterns=patterns, pattern_counts=pattern_counts
+        )
+    case "PHASED_DNA":
+        genotype_counts = defaultdict(lambda: 0)
+        for pattern, count in counts.keys():
+            pattern_mat = tuple(map(lambda p: p % 4, pattern))
+            genotype_counts[pattern_mat] += 1
+            pattern_pat = tuple(map(lambda p: p // 4, pattern))
+            genotype_counts[pattern_pat] += 1
+
+        patterns = np.array([pattern for pattern in genotype_counts.keys()])
+        pattern_counts = np.array([count for count in genotype_counts.values()])
+
+        score_function = compute_score_function(
+            root=true_tree, patterns=patterns, pattern_counts=pattern_counts
+        )
+    case "UNPHASED_DNA":
+        unphased_idx_to_phased_idcs = {
+            0: (0,),  # "AA"
+            1: (1,),  # "CC"
+            2: (2,),  # "GG"
+            3: (3,),  # "TT"
+            4: (0, 1),  # "AC"
+            5: (0, 2),  # "AG"
+            6: (0, 3),  # "AT"
+            7: (1, 2),  # "CG"
+            8: (1, 3),  # "CT"
+            9: (2, 3),  # "GT"
+        }
+        genotype_counts = defaultdict(lambda: 0.0)
+        for pattern, count in counts.keys():
+            pattern_options = [unphased_idx_to_phased_idcs[idx] for idx in pattern]
+            weight = 0.5 ** reduce(mul, map(len, pattern_options), 1)
+            for resolved_pattern in itertools.product(*pattern_options):
+                genotype_counts[resolved_pattern] += weight
+
+        patterns = np.array([pattern for pattern in genotype_counts.keys()])
+        pattern_counts = np.array([count for count in genotype_counts.values()])
+
+        score_function = compute_score_function(
+            root=true_tree, patterns=patterns, pattern_counts=pattern_counts
+        )
+    case _:
+        assert False
 
 
 def neg_log_likelihood(gtr_params, tree_distances):
     gtr_prob_model = make_GTR_prob_model(np.concatenate((pis, gtr_params)))
-    patterns = np.array([pattern for pattern in counts.keys()])
-    pattern_counts = np.array([count for count in counts.values()])
 
-    return -compute_score(
-        root=true_tree,
-        prob_model=gtr_prob_model,
-        tree_distances=tree_distances,
-        patterns=patterns,
-        pattern_counts=pattern_counts,
-    )
-
-
-def neg_log_likelihood_unphased(gtr_params, tree_distances):
-    gtr_prob_model = make_GTR_prob_model(np.concatenate((pis, gtr_params)))
-
-    unphased_idx_to_phased_idcs = {
-        0: (0,),  # "AA"
-        1: (1,),  # "CC"
-        2: (2,),  # "GG"
-        3: (3,),  # "TT"
-        4: (0, 1),  # "AC"
-        5: (0, 2),  # "AG"
-        6: (0, 3),  # "AT"
-        7: (1, 2),  # "CG"
-        8: (1, 3),  # "CT"
-        9: (2, 3),  # "GT"
-    }
-    genotype_counts = defaultdict(lambda: 0.0)
-    for pattern, count in counts.keys():
-        pattern_options = [unphased_idx_to_phased_idcs[idx] for idx in pattern]
-        weight = 0.5 ** reduce(mul, map(len, pattern_options), 1)
-        for resolved_pattern in itertools.product(*pattern_options):
-            genotype_counts[resolved_pattern] += weight
-
-    patterns = np.array([pattern for pattern in genotype_counts.keys()])
-    pattern_counts = np.array([count for count in genotype_counts.values()])
-
-    return -compute_score(
-        root=true_tree,
-        prob_model=gtr_prob_model,
-        tree_distances=tree_distances,
-        patterns=patterns,
-        pattern_counts=pattern_counts,
-    )
-
-
-def neg_log_likelihood_phased(gtr_params, tree_distances):
-    gtr_prob_model = make_GTR_prob_model(np.concatenate((pis, gtr_params)))
-
-    genotype_counts = defaultdict(lambda: 0)
-    for pattern, count in counts.keys():
-        pattern_mat = tuple(map(lambda p: p % 4, pattern))
-        genotype_counts[pattern_mat] += 1
-        pattern_pat = tuple(map(lambda p: p // 4, pattern))
-        genotype_counts[pattern_pat] += 1
-
-    patterns = np.array([pattern for pattern in genotype_counts.keys()])
-    pattern_counts = np.array([count for count in genotype_counts.values()])
-
-    return -compute_score(
-        root=true_tree,
-        prob_model=gtr_prob_model,
-        tree_distances=tree_distances,
-        patterns=patterns,
-        pattern_counts=pattern_counts,
+    return score_function(
+        gtr_prob_model,
+        tree_distances,
     )
 
 
