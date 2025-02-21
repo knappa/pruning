@@ -17,6 +17,12 @@ parser = argparse.ArgumentParser(
 parser.add_argument("--ncells", type=int, required=True, help="number of cells in sample")
 parser.add_argument("--nsamples", type=int, required=True, help="number of samples")
 parser.add_argument("--nsites", type=int, required=True, help="number of sites")
+parser.add_argument("--eff_pop", type=int, required=True, help="effective population size")
+parser.add_argument("--exp_growth_rate", type=float, required=True, help="exponential growth rate")
+parser.add_argument("--somatic_mut_rate", type=float, required=True, help="somatic mutation rate")
+parser.add_argument("--lin_rate_var", type=float, required=True, help="lineage rate variation")
+parser.add_argument("--doublet_rate_mean", type=float, default=0.0, help="doublet rate mean")
+parser.add_argument("--doublet_rate_var", type=float, default=0.0, help="doublet rate variation")
 parser.add_argument("--ado", type=float, required=True, help="Allelic dropout")
 parser.add_argument("--amp_err_mean", type=float, required=True, help="Amplification error mean")
 parser.add_argument("--amp_err_var", type=float, required=True, help="Amplification error variance")
@@ -91,6 +97,12 @@ SEQUENCING_ERROR = opt.seq_err
 RATE_VAR_SITES_GAMMA_PARAM = opt.gamma
 NUC_BASE_FREQ = opt.base_freqs
 MUT_MATRIX = np.array(opt.mut_matrix, dtype=np.float64).reshape(4, 4)
+EFFECTIVE_POP_SIZE = opt.eff_pop
+EXPONENTIAL_GROWTH_RATE = opt.exp_growth_rate
+SOMATIC_MUT_RATE = opt.somatic_mut_rate
+LINEAGE_RATE_VARIATION = opt.lin_rate_var
+DOUBLET_RATE_MEAN = opt.doublet_rate_mean
+DOUBLET_RATE_VAR = opt.doublet_rate_var
 
 CELLCOAL_BIN = opt.cellcoal
 
@@ -102,7 +114,6 @@ DEBUG = opt.log
 # #
 
 NUM_REPLICATES = 1
-# EFFECTIVE_POP_SIZE -e
 ALPHABET_DNA = True
 # TRANSFORMING_BRANCH_LENGTH -k
 # GERMLINE_SNP_RATE -c
@@ -118,8 +129,6 @@ AMPLIFICATION_ERROR = [
     AMPLIFICATION_ERROR_VARIANCE,
     0,
 ]  # (mean of beta-binomial, variance, 2/4 template model type) ****
-DOUBLET_RATE_MEAN = 0.1
-DOUBLET_RATE_VAR = 0.01
 # GENOTYPING_ERROR_MEAN = 0.1
 # GENOTYPING_ERROR_VAR = 0.01
 # ???: ERROR_MATRIX= [[0,1,1,1],[1,0,1,1],[1,1,0,1],[1,1,1,0]]
@@ -140,7 +149,10 @@ def params(user_genome_filename):
         "-n" + str(NUM_REPLICATES),
         "-l" + str(NUM_SITES),
         "-b" + str(int(ALPHABET_DNA)),
-        # "-u" + str(SOMATIC_MUT_RATE),  # somatic mutation rate
+        "-e" + str(EFFECTIVE_POP_SIZE),
+        "-g" + str(EXPONENTIAL_GROWTH_RATE),
+        "-u" + str(SOMATIC_MUT_RATE),  # somatic mutation rate
+        "-i" + str(LINEAGE_RATE_VARIATION),
         # "-d" + str(DELETION_RATE),
         # "-H" + str(COPY_NEUTRAL_LOH),
         "-m2",
@@ -154,8 +166,6 @@ def params(user_genome_filename):
         "-D" + str(ALLELIC_DROPOUT),
         # "-P" + str(ALLELIC_DROPOUT_SITES),
         # "-Q" + str(ALLELIC_DROPOUT_CELLS),
-        "-B" + str(DOUBLET_RATE_MEAN),
-        str(DOUBLET_RATE_VAR),
         # "-G" + str(GENOTYPING_ERROR_MEAN), str(GENOTYPING_ERROR_VAR),
         "-E" + str(SEQUENCING_ERROR),
         "-1",  # print SNV genotypes to a file
@@ -176,6 +186,11 @@ def params(user_genome_filename):
         # "-#" + str(SEED),
         "-y0",
     ]
+    if DOUBLET_RATE_MEAN > 0.0:
+        params += [
+            "-B" + str(DOUBLET_RATE_MEAN),
+            str(DOUBLET_RATE_VAR),
+        ]
     if AMPLIFICATION_ERROR[0] != 0.0:
         params += [
             "-A" + str(AMPLIFICATION_ERROR[0]),
