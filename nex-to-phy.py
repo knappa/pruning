@@ -68,7 +68,10 @@ with open(opt.nex, "r") as nexus_file, open(opt.output, "w") as out_file:
 
         line = next(nexus_file).strip()
 
-    out_file.write(f"{ntax} {nchar}\n")
+    if opt.outgroup:
+        out_file.write(f"{ntax} {nchar}\n")
+    else:
+        out_file.write(f"{ntax-1} {nchar}\n")
     # print(f"{ntax} {nchar}")
 
     line = next(nexus_file).strip()
