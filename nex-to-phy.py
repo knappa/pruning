@@ -3,9 +3,7 @@
 import argparse
 import sys
 
-parser = argparse.ArgumentParser(
-    description="Convert Nexus to Phylip"
-)
+parser = argparse.ArgumentParser(description="Convert Nexus to Phylip")
 
 parser.add_argument(
     "--nex",
@@ -42,7 +40,7 @@ nchar = -1
 datatype = ""
 missing_char = ""
 
-with open(opt.nex, 'r') as nexus_file, open(opt.output, 'w') as out_file:
+with open(opt.nex, "r") as nexus_file, open(opt.output, "w") as out_file:
     line = next(nexus_file).strip()
     assert line.strip() == "#NEXUS"
 
@@ -52,21 +50,21 @@ with open(opt.nex, 'r') as nexus_file, open(opt.output, 'w') as out_file:
 
     line = next(nexus_file).strip()
     while line != "matrix":
-        split_line = line.strip(';').split()
+        split_line = line.strip(";").split()
         if split_line[0] == "dimensions":
             for param in split_line[1:]:
-                k, v = param.split('=')
+                k, v = param.split("=")
                 if k == "ntax":
-                    ntax = int(v.strip(';'))
+                    ntax = int(v.strip(";"))
                 elif k == "nchar":
-                    nchar = int(v.strip(';'))
+                    nchar = int(v.strip(";"))
         elif split_line[0] == "format":
             for param in split_line[1:]:
-                k, v = param.split('=')
+                k, v = param.split("=")
                 if k == "datatype":
-                    datatype = v.strip(';')
+                    datatype = v.strip(";")
                 elif k == "missing":
-                    missing_char = v.strip(';')
+                    missing_char = v.strip(";")
 
         line = next(nexus_file).strip()
 
@@ -82,5 +80,5 @@ with open(opt.nex, 'r') as nexus_file, open(opt.output, 'w') as out_file:
             out_file.write(f"{cell} {' '.join(seq)}\n")
             # print(f"{cell} {' '.join(seq)}")
             if opt.log:
-                print(f'{cell}....')
+                print(f"{cell}....")
         line = next(nexus_file).strip()
