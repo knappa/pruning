@@ -28,7 +28,7 @@ V = np.array(
 
 
 def make_A_GTR(pis):
-    pi_c, pi_g, pi_t, pi_a = pis
+    pi_a, pi_c, pi_g, pi_t = pis
     return np.array(
         [
             # fmt: off
@@ -61,7 +61,7 @@ def make_A_GTR(pis):
 
 
 def make_A_GTR16(pis):
-    pi_c, pi_g, pi_t, pi_a = pis
+    pi_a, pi_c, pi_g, pi_t = pis
     return np.array(
         [
             # fmt: off
@@ -331,7 +331,7 @@ def make_A_GTR16(pis):
 
 
 def make_A_GTR16v(pis):
-    pi_c, pi_g, pi_t, pi_a = pis
+    pi_a, pi_c, pi_g, pi_t = pis
     return np.array(
         [
             # fmt: off
@@ -601,7 +601,7 @@ def make_A_GTR16v(pis):
 
 
 def make_A_GTR_unph(pis):
-    pi_c, pi_g, pi_t, pi_a = pis
+    pi_a, pi_c, pi_g, pi_t = pis
     return np.array(
         # fmt: off
         # @formatter:off
@@ -715,7 +715,7 @@ def make_A_GTR_unph(pis):
 
 
 def make_rate_constraint_matrix(pis):
-    pi_c, pi_g, pi_t, pi_a = pis
+    pi_a, pi_c, pi_g, pi_t = pis
     return np.array(
         [
             2 * pi_a * pi_c,
@@ -729,7 +729,7 @@ def make_rate_constraint_matrix(pis):
 
 
 def make_rate_constraint_matrix_gtr16(pis):
-    pi_c, pi_g, pi_t, pi_a = pis
+    pi_a, pi_c, pi_g, pi_t = pis
     # works for phased and unphased
     return np.array(
         [
@@ -744,7 +744,7 @@ def make_rate_constraint_matrix_gtr16(pis):
 
 
 def make_rate_constraint_matrix_gtr16v(pis):
-    pi_c, pi_g, pi_t, pi_a = pis
+    pi_a, pi_c, pi_g, pi_t = pis
     return np.array(
         [
             2 * pi_a * pi_c,
