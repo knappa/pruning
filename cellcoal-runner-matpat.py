@@ -18,16 +18,22 @@ parser.add_argument("--ncells", type=int, required=True, help="number of cells i
 parser.add_argument("--nsamples", type=int, required=True, help="number of samples")
 parser.add_argument("--nsites", type=int, required=True, help="number of sites")
 parser.add_argument("--eff_pop", type=int, required=True, help="effective population size")
-parser.add_argument("--exp_growth_rate", type=float, required=True, help="exponential growth rate")
+parser.add_argument("--exp_growth_rate", type=float, required=False, help="exponential growth rate")
+parser.add_argument(
+    "--birth_rate", type=float, required=False, help="birth rate (Ohtsaki Innan 2017)"
+)
+parser.add_argument(
+    "--death_rate", type=float, required=False, help="death rate (Ohtsaki Innan 2017)"
+)
 parser.add_argument("--somatic_mut_rate", type=float, required=True, help="somatic mutation rate")
-parser.add_argument("--lin_rate_var", type=float, required=True, help="lineage rate variation")
+parser.add_argument("--lin_rate_var", type=float, required=False, help="lineage rate variation")
 parser.add_argument("--doublet_rate_mean", type=float, default=0.0, help="doublet rate mean")
 parser.add_argument("--doublet_rate_var", type=float, default=0.0, help="doublet rate variation")
 parser.add_argument("--ado", type=float, required=True, help="Allelic dropout")
 parser.add_argument("--amp_err_mean", type=float, required=True, help="Amplification error mean")
 parser.add_argument("--amp_err_var", type=float, required=True, help="Amplification error variance")
 parser.add_argument("--seq_err", type=float, required=True, help="Sequencing error")
-parser.add_argument("--gamma", type=float, default=1.0, help="Rate var sites Gamma")
+parser.add_argument("--gamma", type=float, required=False, help="Rate var sites Gamma")
 parser.add_argument(
     "--base_freqs",
     type=float,
@@ -94,13 +100,29 @@ ALLELIC_DROPOUT = opt.ado
 AMPLIFICATION_ERROR_MEAN = opt.amp_err_mean
 AMPLIFICATION_ERROR_VARIANCE = opt.amp_err_var
 SEQUENCING_ERROR = opt.seq_err
-RATE_VAR_SITES_GAMMA_PARAM = opt.gamma
+RATE_VAR_SITES_GAMMA_PARAM = (
+    opt.gamma if hasattr(opt, "gamma") and opt.gamma is not None else float("-inf")
+)
 NUC_BASE_FREQ = opt.base_freqs
 MUT_MATRIX = np.array(opt.mut_matrix, dtype=np.float64).reshape(4, 4)
 EFFECTIVE_POP_SIZE = opt.eff_pop
-EXPONENTIAL_GROWTH_RATE = opt.exp_growth_rate
+EXPONENTIAL_GROWTH_RATE = (
+    opt.exp_growth_rate
+    if hasattr(opt, "exp_growth_rate") and opt.exp_growth_rate is not None
+    else float("-inf")
+)
+BIRTH_RATE = (
+    opt.birth_rate if hasattr(opt, "birth_rate") and opt.birth_rate is not None else float("-inf")
+)
+DEATH_RATE = (
+    opt.death_rate if hasattr(opt, "death_rate") and opt.death_rate is not None else float("-inf")
+)
 SOMATIC_MUT_RATE = opt.somatic_mut_rate
-LINEAGE_RATE_VARIATION = opt.lin_rate_var
+LINEAGE_RATE_VARIATION = (
+    opt.lin_rate_var
+    if hasattr(opt, "lin_rate_var") and opt.lin_rate_var is not None
+    else float("-inf")
+)
 DOUBLET_RATE_MEAN = opt.doublet_rate_mean
 DOUBLET_RATE_VAR = opt.doublet_rate_var
 
@@ -150,9 +172,7 @@ def params(user_genome_filename):
         "-l" + str(NUM_SITES),
         "-b" + str(int(ALPHABET_DNA)),
         "-e" + str(EFFECTIVE_POP_SIZE),
-        "-g" + str(EXPONENTIAL_GROWTH_RATE),
         "-u" + str(SOMATIC_MUT_RATE),  # somatic mutation rate
-        "-i" + str(LINEAGE_RATE_VARIATION),
         # "-d" + str(DELETION_RATE),
         # "-H" + str(COPY_NEUTRAL_LOH),
         "-m2",
@@ -160,7 +180,6 @@ def params(user_genome_filename):
         "-f" + str(NUC_BASE_FREQ[0]),  # nucleotide base frequencies
         *[str(freq) for freq in NUC_BASE_FREQ[1:]],  # nucleotide base frequencies (rest of them)
         # "-t" + str(TRANSITION_TRANSVERSION_RATIO),
-        "-a" + str(RATE_VAR_SITES_GAMMA_PARAM),
         "-r" + str(FLAT_MUT_MATRIX[0]),
         *[str(entry) for entry in FLAT_MUT_MATRIX[1:]],
         "-D" + str(ALLELIC_DROPOUT),
@@ -191,11 +210,22 @@ def params(user_genome_filename):
             "-B" + str(DOUBLET_RATE_MEAN),
             str(DOUBLET_RATE_VAR),
         ]
-    if AMPLIFICATION_ERROR[0] != 0.0:
+    if AMPLIFICATION_ERROR[0] > 0.0:
         params += [
             "-A" + str(AMPLIFICATION_ERROR[0]),
             *[str(c) for c in AMPLIFICATION_ERROR[1:]],  # value giving error
         ]
+    if EXPONENTIAL_GROWTH_RATE > 0.0:
+        params += ["-g" + str(EXPONENTIAL_GROWTH_RATE)]
+    if BIRTH_RATE > 0.0:
+        params += ["-K" + str(BIRTH_RATE)]
+    if DEATH_RATE > 0.0:
+        params += ["-L" + str(DEATH_RATE)]
+    if RATE_VAR_SITES_GAMMA_PARAM > 0.0:
+        params += ["-a" + str(RATE_VAR_SITES_GAMMA_PARAM)]
+    if LINEAGE_RATE_VARIATION > 0.0:
+        params += ["-i" + str(LINEAGE_RATE_VARIATION)]
+
     return params
 
 
