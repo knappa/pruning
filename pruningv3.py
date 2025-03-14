@@ -5,8 +5,7 @@ import os.path
 import sys
 from collections import defaultdict
 from contextlib import redirect_stdout
-from functools import reduce
-from operator import mul
+from functools import partial
 from typing import Callable, List, Tuple
 
 import numba
@@ -14,9 +13,14 @@ import numpy as np
 import scipy
 from ete3 import Tree
 from scipy.optimize import OptimizeResult, minimize
-from scipy.special import logsumexp, xlogy
+from scipy.special import xlogy
 
 from matrices import V, make_A_GTR, make_A_GTR16v, make_A_GTR_unph, make_rate_constraint_matrix
+from util import kahan_dot, log_dot, log_matrix_mult
+
+# from functools import reduce
+# from operator import mul
+
 
 parser = argparse.ArgumentParser(description="Compute log likelihood using the pruning algorithm")
 parser.add_argument("--seqs", type=str, required=True, help="sequence alignments in phylip format")
@@ -60,7 +64,7 @@ if hasattr(sys, "ps1"):
     #                         "--model DNA "
     #                         "--log ".split())
     opt = parser.parse_args(
-        "--seqs test-diploid.phy " "--tree test-diploid.nwk " "--model PHASED_DNA " "--log ".split()
+        "--seqs test/test-diploid.phy --tree test/test-diploid.nwk --model PHASED_DNA --log ".split()
     )
     # opt = parser.parse_args(
     #     "--seqs diploid-000.phy "
@@ -77,9 +81,9 @@ if opt.log:
     print(opt)
 
 if (
-    not opt.overwrite
-    and opt.output is not None
-    and (os.path.isfile(opt.output + ".nwk") or os.path.isfile(opt.output + ".log"))
+        not opt.overwrite
+        and opt.output is not None
+        and (os.path.isfile(opt.output + ".nwk") or os.path.isfile(opt.output + ".log"))
 ):
     print("output files from previous run present, exiting.")
     exit()
@@ -94,9 +98,9 @@ def np_full_print(nparray):
 
     # noinspection PyTypeChecker
     with np.printoptions(
-        threshold=np.inf,
-        linewidth=shutil.get_terminal_size((80, 20)).columns,
-        suppress=True,
+            threshold=np.inf,
+            linewidth=shutil.get_terminal_size((80, 20)).columns,
+            suppress=True,
     ):
         print(nparray)
 
@@ -145,16 +149,26 @@ unphased_nuc_to_idx = {
     "GG": 2,
     "TT": 3,
     "AC": 4,
+    "CA": 4,
     "AG": 5,
+    "GA": 5,
     "AT": 6,
+    "TA": 6,
     "CG": 7,
+    "GC": 7,
     "CT": 8,
+    "TC": 8,
     "GT": 9,
+    "TG": 9,
     "??": 10,
     "A?": 11,
+    "?A": 11,
     "C?": 12,
+    "?C": 12,
     "G?": 13,
+    "?G": 13,
     "T?": 14,
+    "?T": 14,
 }
 base_freq_counts = np.zeros(4, dtype=np.int64)
 
@@ -276,476 +290,19 @@ for idx in range(nsites):
 # initial estimates for branch lengths based on F81 distances
 
 
-@numba.njit
-def dna_disagreement(seq1: np.ndarray, seq2: np.ndarray) -> float:
-    disagreement = 0.0
-    assert seq1.shape == seq2.shape
-    for idx in range(len(seq1)):
-        if seq1[idx] < 4 and seq2[idx] < 4:
-            if seq1[idx] != seq2[idx]:
-                disagreement += 1.0
-        else:
-            disagreement += 0.75
-    return disagreement / len(seq1)
-
-
-unphased_nuc_to_idx = {
-    "AA": 0,
-    "CC": 1,
-    "GG": 2,
-    "TT": 3,
-    "AC": 4,
-    "AG": 5,
-    "AT": 6,
-    "CG": 7,
-    "CT": 8,
-    "GT": 9,
-    "??": 10,
-    "A?": 11,
-    "C?": 12,
-    "G?": 13,
-    "T?": 14,
-}
-
-
-@numba.njit
-def phased_dna_disagreement(seq1: np.ndarray, seq2: np.ndarray) -> float:
-    disagreement = 0.0
-    assert seq1.shape == seq2.shape
-    for idx in range(len(seq1)):
-        seq1_nuc_pair = int(seq1[idx])
-        seq2_nuc_pair = int(seq2[idx])
-        if seq1_nuc_pair < 10 and seq2_nuc_pair < 10:
-            if seq1_nuc_pair != seq2_nuc_pair:
-                disagreement += 1.0
-        elif seq1_nuc_pair == 10:
-            if seq2_nuc_pair < 4:
-                # match with AA, CC, GG, TT
-                disagreement += 0.9375  # 15/16
-            elif seq2_nuc_pair < 10:
-                # match with AC, AG, AT, CG, ...
-                disagreement += 0.875  # 14/16 = 7/8
-            elif seq2_nuc_pair == 10:
-                # match between ?? and ??
-                disagreement += 0.890625  # 1/16 * (15/16) * 4 + 2/16 * (7/8) * 6
-            else:
-                # match between ?? and A?, C?, G?, T?
-                disagreement += 0.890625  # (1/4) * (15/16) + (3/4) * (7/8)
-        elif seq2_nuc_pair == 10:
-            if seq1_nuc_pair < 4:
-                # match with AA, CC, GG, TT
-                disagreement += 0.9375  # 15/16
-            elif seq1_nuc_pair < 10:
-                # match with AC, AG, AT, CG, ...
-                disagreement += 0.875  # 14/16 = 7/8
-            elif seq1_nuc_pair == 10:
-                # match between ?? and ??
-                disagreement += 0.890625  # 1/16 * (15/16) * 4 + 2/16 * (7/8) * 6
-            else:
-                # match between ?? and A?, C?, G?, T?
-                disagreement += 0.890625  # (1/4) * (15/16) + (3/4) * (7/8)
-        elif seq1_nuc_pair > 10:
-            if seq1_nuc_pair == 11:  # A?
-                if (
-                    seq2_nuc_pair == 0
-                    or seq2_nuc_pair == 4
-                    or seq2_nuc_pair == 5
-                    or seq2_nuc_pair == 6
-                ):
-                    # AA, AC, AG, AT
-                    disagreement += 0.75  # 3/4
-                elif (
-                    seq2_nuc_pair == 1
-                    or seq2_nuc_pair == 2
-                    or seq2_nuc_pair == 3
-                    or seq2_nuc_pair == 7
-                    or seq2_nuc_pair == 8
-                    or seq2_nuc_pair == 9
-                ):
-                    # CC, GG, TT, CG, CT, GT
-                    disagreement += 1.0
-                elif seq2_nuc_pair == 10:
-                    disagreement += 0.890625  # (1/4) * (15/16) + (3/4) * (7/8)
-                elif seq2_nuc_pair == 11:
-                    # A?
-                    disagreement += 0.75  # 3/4
-                else:
-                    # seq2_nuc_pair > 11: C? G? T?
-                    disagreement += 0.9375  # 1-(1/4)**2
-            elif seq1_nuc_pair == 12:  # C?
-                if (
-                    seq2_nuc_pair == 1
-                    or seq2_nuc_pair == 4
-                    or seq2_nuc_pair == 7
-                    or seq2_nuc_pair == 8
-                ):
-                    # CC, AC, CG, CT
-                    disagreement += 0.75  # 3/4
-                elif (
-                    seq2_nuc_pair == 0
-                    or seq2_nuc_pair == 2
-                    or seq2_nuc_pair == 3
-                    or seq2_nuc_pair == 5
-                    or seq2_nuc_pair == 6
-                    or seq2_nuc_pair == 9
-                ):
-                    # AA, GG, TT, AG, AT, GT
-                    disagreement += 1.0
-                elif seq2_nuc_pair == 10:
-                    disagreement += 0.890625  # (1/4) * (15/16) + (3/4) * (7/8)
-                elif seq2_nuc_pair == 12:
-                    # C?
-                    disagreement += 0.75  # 3/4
-                else:
-                    # A? G? T?
-                    disagreement += 0.9375  # 1-(1/4)**2
-            elif seq1_nuc_pair == 13:  # G?
-                if (
-                    seq2_nuc_pair == 2
-                    or seq2_nuc_pair == 5
-                    or seq2_nuc_pair == 7
-                    or seq2_nuc_pair == 9
-                ):
-                    # GG, AG, CG, GT
-                    disagreement += 0.75  # 3/4
-                elif (
-                    seq2_nuc_pair == 0
-                    or seq2_nuc_pair == 1
-                    or seq2_nuc_pair == 3
-                    or seq2_nuc_pair == 4
-                    or seq2_nuc_pair == 6
-                    or seq2_nuc_pair == 8
-                ):
-                    # AA, CC, TT, AC, AT, CT
-                    disagreement += 1.0
-                elif seq2_nuc_pair == 10:
-                    disagreement += 0.890625  # (1/4) * (15/16) + (3/4) * (7/8)
-                elif seq2_nuc_pair == 13:
-                    # G?
-                    disagreement += 0.75  # 3/4
-                else:
-                    # A? C? T?
-                    disagreement += 0.9375  # 1-(1/4)**2
-            else:
-                # seq1_nuc_pair == 14:  # T?
-                if (
-                    seq2_nuc_pair == 3
-                    or seq2_nuc_pair == 6
-                    or seq2_nuc_pair == 8
-                    or seq2_nuc_pair == 9
-                ):
-                    # TT, AT, CT, GT
-                    disagreement += 0.75  # 3/4
-                elif (
-                    seq2_nuc_pair == 0
-                    or seq2_nuc_pair == 1
-                    or seq2_nuc_pair == 2
-                    or seq2_nuc_pair == 4
-                    or seq2_nuc_pair == 5
-                    or seq2_nuc_pair == 7
-                ):
-                    # AA, CC, GG, AC, AG, CG
-                    disagreement += 1.0
-                elif seq2_nuc_pair == 10:
-                    disagreement += 0.890625  # (1/4) * (15/16) + (3/4) * (7/8)
-                elif seq2_nuc_pair == 14:
-                    # T?
-                    disagreement += 0.75  # 3/4
-                else:
-                    # A? C? G?
-                    disagreement += 0.9375  # 1-(1/4)**
-        else:  # seq2_nuc_pair > 10:
-            if seq2_nuc_pair == 11:  # A?
-                if (
-                    seq1_nuc_pair == 0
-                    or seq1_nuc_pair == 4
-                    or seq1_nuc_pair == 5
-                    or seq1_nuc_pair == 6
-                ):
-                    # AA, AC, AG, AT
-                    disagreement += 0.75  # 3/4
-                elif (
-                    seq1_nuc_pair == 1
-                    or seq1_nuc_pair == 2
-                    or seq1_nuc_pair == 3
-                    or seq1_nuc_pair == 7
-                    or seq1_nuc_pair == 8
-                    or seq1_nuc_pair == 9
-                ):
-                    # CC, GG, TT, CG, CT, GT
-                    disagreement += 1.0
-                elif seq1_nuc_pair == 10:
-                    disagreement += 0.890625  # (1/4) * (15/16) + (3/4) * (7/8)
-                elif seq1_nuc_pair == 11:
-                    # A?
-                    disagreement += 0.75  # 3/4
-                else:
-                    # seq1_nuc_pair > 11: C? G? T?
-                    disagreement += 0.9375  # 1-(1/4)**2
-            elif seq2_nuc_pair == 12:  # C?
-                if (
-                    seq1_nuc_pair == 1
-                    or seq1_nuc_pair == 4
-                    or seq1_nuc_pair == 7
-                    or seq1_nuc_pair == 8
-                ):
-                    # CC, AC, CG, CT
-                    disagreement += 0.75  # 3/4
-                elif (
-                    seq1_nuc_pair == 0
-                    or seq1_nuc_pair == 2
-                    or seq1_nuc_pair == 3
-                    or seq1_nuc_pair == 5
-                    or seq1_nuc_pair == 6
-                    or seq1_nuc_pair == 9
-                ):
-                    # AA, GG, TT, AG, AT, GT
-                    disagreement += 1.0
-                elif seq1_nuc_pair == 10:
-                    disagreement += 0.890625  # (1/4) * (15/16) + (3/4) * (7/8)
-                elif seq1_nuc_pair == 12:
-                    # C?
-                    disagreement += 0.75  # 3/4
-                else:
-                    # A? G? T?
-                    disagreement += 0.9375  # 1-(1/4)**2
-            elif seq2_nuc_pair == 13:  # G?
-                if (
-                    seq1_nuc_pair == 2
-                    or seq1_nuc_pair == 5
-                    or seq1_nuc_pair == 7
-                    or seq1_nuc_pair == 9
-                ):
-                    # GG, AG, CG, GT
-                    disagreement += 0.75  # 3/4
-                elif (
-                    seq1_nuc_pair == 0
-                    or seq1_nuc_pair == 1
-                    or seq1_nuc_pair == 3
-                    or seq1_nuc_pair == 4
-                    or seq1_nuc_pair == 6
-                    or seq1_nuc_pair == 8
-                ):
-                    # AA, CC, TT, AC, AT, CT
-                    disagreement += 1.0
-                elif seq1_nuc_pair == 10:
-                    disagreement += 0.890625  # (1/4) * (15/16) + (3/4) * (7/8)
-                elif seq1_nuc_pair == 13:
-                    # G?
-                    disagreement += 0.75  # 3/4
-                else:
-                    # A? C? T?
-                    disagreement += 0.9375  # 1-(1/4)**2
-            else:
-                # seq2_nuc_pair == 14:  # T?
-                if (
-                    seq1_nuc_pair == 3
-                    or seq1_nuc_pair == 6
-                    or seq1_nuc_pair == 8
-                    or seq1_nuc_pair == 9
-                ):
-                    # TT, AT, CT, GT
-                    disagreement += 0.75  # 3/4
-                elif (
-                    seq1_nuc_pair == 0
-                    or seq1_nuc_pair == 1
-                    or seq1_nuc_pair == 2
-                    or seq1_nuc_pair == 4
-                    or seq1_nuc_pair == 5
-                    or seq1_nuc_pair == 7
-                ):
-                    # AA, CC, GG, AC, AG, CG
-                    disagreement += 1.0
-                elif seq1_nuc_pair == 10:
-                    disagreement += 0.890625  # (1/4) * (15/16) + (3/4) * (7/8)
-                elif seq1_nuc_pair == 14:
-                    # T?
-                    disagreement += 0.75  # 3/4
-                else:
-                    # A? C? G?
-                    disagreement += 0.9375  # 1-(1/4)**
-
-    return disagreement / len(seq1)
-
-
-@numba.njit
-def unphased_dna_disagreement(seq1: np.ndarray, seq2: np.ndarray) -> float:
-    disagreement = 0.0
-    assert seq1.shape == seq2.shape
-    for idx in range(len(seq1)):
-        seq1_nuc_m, seq1_nuc_p = divmod(int(seq1[idx]), 5)
-        seq2_nuc_m, seq2_nuc_p = divmod(int(seq2[idx]), 5)
-        if seq1_nuc_m < 4 and seq2_nuc_m < 4:
-            # no maternal ambiguity
-            if seq1_nuc_m != seq2_nuc_m:
-                disagreement += 1.0
-            else:
-                if seq1_nuc_p < 4 and seq2_nuc_p < 4:
-                    # no maternal ambiguity & matches, no paternal ambiguity
-                    if seq1_nuc_p != seq2_nuc_p:
-                        disagreement += 1.0
-                else:
-                    # no maternal ambiguity & matches, paternal ambiguity
-                    disagreement += 0.75
-        else:
-            # maternal ambiguity
-            if seq1_nuc_p < 4 and seq2_nuc_p < 4:
-                # maternal ambiguity, no paternal ambiguity
-                if seq1_nuc_p != seq2_nuc_p:
-                    # maternal ambiguity, no paternal ambiguity, does not match
-                    disagreement += 1.0
-                else:
-                    # maternal ambiguity, no paternal ambiguity, does match
-                    disagreement += 0.75
-            else:
-                # maternal ambiguity, paternal ambiguity
-                disagreement += 0.9375  # 15/16, as both must match
-    return disagreement / len(seq1)
-
-
 match opt.model:
     case "DNA":
+        from distance_functions import dna_sequence_distance
 
-        def sequence_distance(seq1: np.ndarray, seq2: np.ndarray) -> Tuple[float, float]:
-            """
-            F81 distance, a generalization of the JC69 distance, which takes into account nucleotide frequencies
-            :param seq1: a sequence
-            :param seq2: a sequence
-            :return: F81 distance, variance of distance * sequence length
-            """
-            #
-            beta = 1 / (1 - np.sum(pis**2))
-            disagreement = dna_disagreement(seq1, seq2)
-            return (
-                -np.log(np.maximum(1e-10, 1 - beta * disagreement)) / beta,
-                # np.maximum(1e-10, (1 - disagreement) * disagreement)
-                # / np.maximum(1e-10, (beta * disagreement - 1) ** 2),
-                np.clip(
-                    np.nan_to_num(
-                        (1 - disagreement) * disagreement / (beta * disagreement - 1) ** 2
-                    ),
-                    1,
-                    1_000,
-                ),
-            )
-
+        sequence_distance = partial(dna_sequence_distance, pis=pis)
     case "PHASED_DNA":
+        from distance_functions import phased_sequence_distance
 
-        def sequence_distance(seq1: np.ndarray, seq2: np.ndarray) -> Tuple[float, float]:
-            """
-            F81-16 distance, a generalization of the JC69 distance, which takes into account nucleotide frequencies
-            :param seq1: a sequence
-            :param seq2: a sequence
-            :return: F81-16 distance, variance of distance * sequence length
-            """
-            #
-            beta = 1 / (2 * (1 - np.sum(pis**2)))
-            disagreement = phased_dna_disagreement(seq1, seq2)
-            return (
-                -np.log(
-                    np.maximum(1e-10, 1 - 2 * beta + 2 * beta * np.sqrt(1 - disagreement)),
-                )
-                / beta,
-                np.clip(
-                    np.nan_to_num(
-                        disagreement / (2 * beta * np.sqrt(1 - disagreement) - 2 * beta + 1) ** 2
-                    ),
-                    1,
-                    1_000,
-                ),
-            )
-
+        sequence_distance = partial(phased_sequence_distance, pis=pis)
     case "UNPHASED_DNA":
+        from distance_functions import unphased_sequence_distance
 
-        def sequence_distance(seq1: np.ndarray, seq2: np.ndarray) -> Tuple[float, float]:
-            """
-            F81-10 distance, a generalization of the JC69 distance, which takes into account nucleotide frequencies
-            :param seq1: a sequence
-            :param seq2: a sequence
-            :return: F81-10 distance
-            """
-            #
-            beta = 1 / (2 * (1 - np.sum(pis**2)))
-            zeta = np.sum([np.prod(pis[np.arange(4) != idx]) for idx in range(4)])
-            eta = np.prod(pis)
-            disagreement = unphased_dna_disagreement(seq1, seq2)
-            return (
-                -np.log(
-                    np.maximum(
-                        1e-10,
-                        (
-                            32 * beta**2 * (eta - zeta)
-                            - 4 * beta
-                            - 3
-                            + beta
-                            * np.sqrt(8)
-                            * np.sqrt(2 + disagreement * (32 * beta**2 * (zeta - eta) + 3))
-                        )
-                        / (32 * beta**2 * (eta - zeta) - 8 * beta + 3 - 8 * beta**2 * disagreement),
-                    )
-                ),
-                np.clip(
-                    np.nan_to_num(
-                        -(
-                            (
-                                32 * beta**2 * (eta - zeta)
-                                - 8 * beta**2 * disagreement
-                                - 8 * beta
-                                + 3
-                            )
-                            ** 2
-                        )
-                        * (
-                            np.sqrt(2)
-                            * (32 * beta**2 * (eta - zeta) - 3)
-                            * beta
-                            / (
-                                (
-                                    32 * beta**2 * (eta - zeta)
-                                    - 8 * beta**2 * disagreement
-                                    - 8 * beta
-                                    + 3
-                                )
-                                * np.sqrt(-(32 * beta**2 * (eta - zeta) - 3) * disagreement + 2)
-                            )
-                            - 8
-                            * (
-                                32 * beta**2 * (eta - zeta)
-                                + 2
-                                * np.sqrt(2)
-                                * np.sqrt(-(32 * beta**2 * (eta - zeta) - 3) * disagreement + 2)
-                                * beta
-                                - 4 * beta
-                                - 3
-                            )
-                            * beta**2
-                            / (
-                                32 * beta**2 * (eta - zeta)
-                                - 8 * beta**2 * disagreement
-                                - 8 * beta
-                                + 3
-                            )
-                            ** 2
-                        )
-                        ** 2
-                        * (disagreement - 1)
-                        * disagreement
-                        / (
-                            32 * beta**2 * (eta - zeta)
-                            + 2
-                            * np.sqrt(2)
-                            * np.sqrt(-(32 * beta**2 * (eta - zeta) - 3) * disagreement + 2)
-                            * beta
-                            - 4 * beta
-                            - 3
-                        )
-                        ** 2
-                    ),
-                    1,
-                    1_000,
-                ),
-            )
-
+        sequence_distance = partial(unphased_sequence_distance, pis=pis)
     case _:
         assert False
 
@@ -832,7 +389,7 @@ constraints_val = np.array(constraints_val)
 
 def objective(x):
     prediction_err = constraints_eqn @ x - constraints_val
-    return np.mean(x**2) + np.mean(prediction_err**2 / np.concatenate(([1], leaf_vars)))
+    return np.mean(x ** 2) + np.mean(prediction_err ** 2 / np.concatenate(([1], leaf_vars)))
 
 
 num_func_evals = 0
@@ -877,9 +434,11 @@ if opt.pre_estimate_params:
     count_patterns = np.zeros((len(taxa) * (len(taxa) - 1) // 2, 4, 4))
     for idx, (tx1, tx2) in enumerate(itertools.combinations(taxa, 2)):
         for idx1, idx2 in zip(sequences[tx1], sequences[tx2]):
+            # TODO: not adapted for unphased (or for phased?, just DNA?)
             count_patterns[idx, idx1, idx2] += 1
     count_patterns /= np.sum(count_patterns, axis=(1, 2))[:, None, None]
     reduced_pattern = np.sum(count_patterns, axis=2)
+
 
     def make_initial_param_objective(A, dim, rate_constraint_matrix):
         def initial_param_objective(s_est, leaf_to_leaf_distances):
@@ -889,23 +448,24 @@ if opt.pre_estimate_params:
             joint_dist = reduced_pattern[:, :, None] * p_ts
             # compute KL divergence plus rate constraint
             return (
-                np.mean(
-                    np.sum(
-                        np.maximum(
-                            np.nan_to_num(xlogy(count_patterns, count_patterns), neginf=-1e5),
-                            -1e5,
+                    np.mean(
+                        np.sum(
+                            np.maximum(
+                                np.nan_to_num(xlogy(count_patterns, count_patterns), neginf=-1e5),
+                                -1e5,
+                            )
+                            - np.maximum(
+                                np.nan_to_num(xlogy(count_patterns, joint_dist), neginf=-1e5),
+                                -1e5,
+                            ),
+                            axis=(1, 2),
                         )
-                        - np.maximum(
-                            np.nan_to_num(xlogy(count_patterns, joint_dist), neginf=-1e5),
-                            -1e5,
-                        ),
-                        axis=(1, 2),
                     )
-                )
-                + (rate_constraint_matrix @ s_est - 1) ** 2
+                    + (rate_constraint_matrix @ s_est - 1) ** 2
             )
 
         return initial_param_objective
+
 
     match opt.model:
         case "DNA":
@@ -949,6 +509,7 @@ else:
     s_est = np.ones(6)
     s_est = s_est / (rate_constraint_matrix @ s_est)
 
+
 ################################################################################
 # jointly optimize GTR params and branch lens using neg-log likelihood
 
@@ -960,7 +521,7 @@ def prob_model_helper(t, left, right, evals):
 
 
 def prob_model_helper_vec(
-    t: np.ndarray, left: np.ndarray, right: np.ndarray, evals: np.ndarray
+        t: np.ndarray, left: np.ndarray, right: np.ndarray, evals: np.ndarray
 ) -> np.ndarray:
     return ((np.exp(t[:, None] * evals)[:, None, :] * left[None, :, :]) @ right).astype(np.float64)
 
@@ -1014,31 +575,383 @@ def make_GTR_prob_model(gtr_params, *, vec=False):
         return lambda t: prob_model_helper(t, left, right, evals)
 
 
-################################################################################
-################################################################################
+def make_unphased_GTR_prob_model(gtr_params, *, vec=False):
+    pi_a, pi_c, pi_g, pi_t = np.abs(gtr_params[:4])
+    # print(f"{pi_a=} {pi_c=} {pi_g=} {pi_t=}")
+    s_ac, s_ag, s_at, s_cg, s_ct, s_gt = np.abs(gtr_params[4:])
+    # print(f"{s_ac=} {s_ag=} {s_at=} {s_cg=} {s_ct=} {s_gt=}")
 
-def log_matrix_mult(v, P) -> np.ndarray:
-    # noinspection PyTypeChecker
-    return logsumexp(np.expand_dims(v, axis=-1) + P, axis=-2, return_sign=False, keepdims=False)
+    sym_Q = np.array(
+        [
+            [
+                -2 * pi_c * s_ac - 2 * pi_g * s_ag - 2 * pi_t * s_at,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                0,
+                0,
+                0,
+            ],
+            [
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                -pi_a * s_ac - pi_c * s_ac - pi_g * s_ag - pi_t * s_at - pi_g * s_cg - pi_t * s_ct,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                0,
+                0,
+            ],
+            [
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                -pi_c * s_ac - pi_a * s_ag - pi_g * s_ag - pi_t * s_at - pi_c * s_cg - pi_t * s_gt,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                0,
+            ],
+            [
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                -pi_c * s_ac - pi_g * s_ag - pi_a * s_at - pi_t * s_at - pi_c * s_ct - pi_g * s_gt,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+            ],
+            [
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                0,
+                0,
+                0,
+                -pi_a * s_ac - pi_c * s_ac - pi_g * s_ag - pi_t * s_at - pi_g * s_cg - pi_t * s_ct,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                0,
+                0,
+                0,
+            ],
+            [
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                -2 * pi_a * s_ac - 2 * pi_g * s_cg - 2 * pi_t * s_ct,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                0,
+                0,
+            ],
+            [
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                -pi_a * s_ac - pi_a * s_ag - pi_c * s_cg - pi_g * s_cg - pi_t * s_ct - pi_t * s_gt,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                0,
+            ],
+            [
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                -pi_a * s_ac - pi_a * s_at - pi_g * s_cg - pi_c * s_ct - pi_t * s_ct - pi_g * s_gt,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+            ],
+            [
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                0,
+                0,
+                0,
+                -pi_c * s_ac - pi_a * s_ag - pi_g * s_ag - pi_t * s_at - pi_c * s_cg - pi_t * s_gt,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                0,
+                0,
+                0,
+            ],
+            [
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                -pi_a * s_ac - pi_a * s_ag - pi_c * s_cg - pi_g * s_cg - pi_t * s_ct - pi_t * s_gt,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                0,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                0,
+                0,
+            ],
+            [
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                -2 * pi_a * s_ag - 2 * pi_c * s_cg - 2 * pi_t * s_gt,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                0,
+                0,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                0,
+            ],
+            [
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                -pi_a * s_ag - pi_a * s_at - pi_c * s_cg - pi_c * s_ct - pi_g * s_gt - pi_t * s_gt,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+            ],
+            [
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                0,
+                0,
+                0,
+                -pi_c * s_ac - pi_g * s_ag - pi_a * s_at - pi_t * s_at - pi_c * s_ct - pi_g * s_gt,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+            ],
+            [
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_c) * s_ac,
+                -pi_a * s_ac - pi_a * s_at - pi_g * s_cg - pi_c * s_ct - pi_t * s_ct - pi_g * s_gt,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+            ],
+            [
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_g) * s_ag,
+                np.sqrt(pi_c) * np.sqrt(pi_g) * s_cg,
+                -pi_a * s_ag - pi_a * s_at - pi_c * s_cg - pi_c * s_ct - pi_g * s_gt - pi_t * s_gt,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+            ],
+            [
+                0,
+                0,
+                0,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                np.sqrt(pi_a) * np.sqrt(pi_t) * s_at,
+                np.sqrt(pi_c) * np.sqrt(pi_t) * s_ct,
+                np.sqrt(pi_g) * np.sqrt(pi_t) * s_gt,
+                -2 * pi_a * s_at - 2 * pi_c * s_ct - 2 * pi_g * s_gt,
+            ],
+        ],
+        dtype=np.float64,
+    )
 
+    evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-def log_dot(v, w) -> np.ndarray:
-    # noinspection PyTypeChecker
-    return logsumexp(v + w, axis=-1, return_sign=False, keepdims=False)
+    pi16 = np.kron([pi_a, pi_c, pi_g, pi_t], [pi_a, pi_c, pi_g, pi_t])
 
+    left16 = sym_evecs * np.sqrt(pi16)[:, None]
+    right16 = sym_evecs.T / np.sqrt(pi16)
 
-def kahan_dot(v: np.ndarray, w: np.ndarray):
-    accumulator = np.float64(0.0)
-    compensator = np.float64(0.0)
-    for idx in range(v.shape[-1]):
-        y = np.squeeze(v[idx] * w[idx]) - compensator
-        # print(f"{y=}")
-        t = accumulator + y
-        # print(f"{t=}")
-        compensator = (t - accumulator) - y
-        # print(f"{compensator=}")
-        accumulator = t
-    return accumulator
+    perm = np.array(
+        [
+            # fmt: off
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]
+            # fmt: on
+        ], dtype=np.int64)
+    U = np.array(
+        [
+            # fmt: off
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+            # fmt: on
+        ], dtype=np.int64
+    )
+    # V = np.linalg.pinv(U)
+    V = np.array(
+        [
+            # fmt: off
+            [1., 0., 0., 0., 0. , 0. , 0. , 0. , 0. , 0. ],
+            [0., 1., 0., 0., 0. , 0. , 0. , 0. , 0. , 0. ],
+            [0., 0., 1., 0., 0. , 0. , 0. , 0. , 0. , 0. ],
+            [0., 0., 0., 1., 0. , 0. , 0. , 0. , 0. , 0. ],
+            [0., 0., 0., 0., 0.5, 0. , 0. , 0. , 0. , 0. ],
+            [0., 0., 0., 0., 0.5, 0. , 0. , 0. , 0. , 0. ],
+            [0., 0., 0., 0., 0. , 0.5, 0. , 0. , 0. , 0. ],
+            [0., 0., 0., 0., 0. , 0.5, 0. , 0. , 0. , 0. ],
+            [0., 0., 0., 0., 0. , 0. , 0.5, 0. , 0. , 0. ],
+            [0., 0., 0., 0., 0. , 0. , 0.5, 0. , 0. , 0. ],
+            [0., 0., 0., 0., 0. , 0. , 0. , 0.5, 0. , 0. ],
+            [0., 0., 0., 0., 0. , 0. , 0. , 0.5, 0. , 0. ],
+            [0., 0., 0., 0., 0. , 0. , 0. , 0. , 0.5, 0. ],
+            [0., 0., 0., 0., 0. , 0. , 0. , 0. , 0.5, 0. ],
+            [0., 0., 0., 0., 0. , 0. , 0. , 0. , 0. , 0.5],
+            [0., 0., 0., 0., 0. , 0. , 0. , 0. , 0. , 0.5],
+            # fmt: on
+        ], dtype=np.float64
+    )
+
+    # change of
+    left10 = U @ perm @ left16
+    right10 = right16 @ perm.T @ V
+
+    if vec:
+        return lambda t: prob_model_helper_vec(t, left10, right10, evals)
+    else:
+        return lambda t: prob_model_helper(t, left10, right10, evals)
+
 
 ################################################################################
 ################################################################################
@@ -1059,8 +972,6 @@ def compute_leaf_vec(patterns) -> Callable:
 
     # return local_score_function_terminal
     return numba.jit(local_score_function_terminal, nopython=True)
-
-
 
 
 def compute_score_function_helper(node, patterns, taxa_indices_) -> Callable:
@@ -1125,6 +1036,7 @@ def compute_score_function_helper(node, patterns, taxa_indices_) -> Callable:
 
     left_index = node_indices[left_node.name]
     right_index = node_indices[right_node.name]
+
     # print(f"{left_index=}")
     # print(f"{right_index=}")
 
@@ -1162,6 +1074,131 @@ def compute_score_function(*, root, patterns, pattern_counts) -> Callable:
     # return score_function
 
 
+################################################################################
+################################################################################
+
+
+def compute_unphased_leaf_vec(patterns) -> Callable:
+    # print(f"compute_unphased_leaf_vector({patterns=})")
+    id10 = np.identity(10, dtype=np.float64)
+    arr = np.concatenate((id10, [np.ones(10) / 10]), axis=0)
+    # TODO: other ambiguities?
+    with np.errstate(divide="ignore"):
+        result = np.clip(
+            np.log(np.array([arr[p, :] for p in patterns], dtype=np.float64)), -1e100, 0.0
+        )
+
+    # noinspection PyUnusedLocal
+    def local_score_function_terminal(prob_matrices: np.ndarray) -> np.ndarray:
+        # print(f"local_score_function_terminal({prob_matrices=})->{result}")
+        return result
+
+    return local_score_function_terminal
+    # return numba.jit(local_score_function_terminal, nopython=True)
+
+
+def compute_unphased_score_function_helper(node, patterns, taxa_indices_) -> Callable:
+    # taxa_indices_ should a dict who's keys are taxon names (str) and values should be the
+    # corresponding index (int) in the patterns.
+    # print(f"compute_unphased_score_function_helper({node=},{patterns=},{taxa_indices_=})")
+    assert len(node.children) == 2
+    left_node, right_node = node.children
+
+    left_leaf_names = set(leaf.name for leaf in left_node.iter_leaves())
+    right_leaf_names = set(leaf.name for leaf in right_node.iter_leaves())
+
+    left_leaf_idcs = tuple(
+        [idx for leaf_name, idx in taxa_indices_.items() if leaf_name in left_leaf_names]
+    )
+    right_leaf_idcs = tuple(
+        [idx for leaf_name, idx in taxa_indices_.items() if leaf_name in right_leaf_names]
+    )
+
+    left_taxa_rel_indices = {
+        name: idx
+        for idx, name in enumerate(
+            [leaf_name for leaf_name in taxa_indices_.keys() if leaf_name in left_leaf_names]
+        )
+    }
+    right_taxa_rel_indices = {
+        name: idx
+        for idx, name in enumerate(
+            [leaf_name for leaf_name in taxa_indices_.keys() if leaf_name in right_leaf_names]
+        )
+    }
+
+    left_patterns, left_pattern_inverse = np.unique(
+        patterns[:, left_leaf_idcs], axis=0, return_inverse=True
+    )
+    right_patterns, right_pattern_inverse = np.unique(
+        patterns[:, right_leaf_idcs], axis=0, return_inverse=True
+    )
+
+    if left_node.is_leaf():
+        w_l_function = compute_unphased_leaf_vec(left_patterns)
+    else:
+        w_l_function = compute_unphased_score_function_helper(
+            left_node, left_patterns, left_taxa_rel_indices
+        )
+
+    if right_node.is_leaf():
+        w_r_function = compute_unphased_leaf_vec(right_patterns)
+    else:
+        w_r_function = compute_unphased_score_function_helper(
+            right_node, right_patterns, right_taxa_rel_indices
+        )
+
+    left_index = node_indices[left_node.name]
+    right_index = node_indices[right_node.name]
+
+    def local_score_function_branching(prob_matrices: np.ndarray) -> np.ndarray:
+        w_l = w_l_function(prob_matrices)
+        w_r = w_r_function(prob_matrices)
+
+        with np.errstate(divide="ignore"):
+            p_l = np.clip(np.log(np.clip(prob_matrices[left_index, :, :], 0.0, 1.0)), -1e100, 0.0)
+            p_r = np.clip(np.log(np.clip(prob_matrices[right_index, :, :], 0.0, 1.0)), -1e100, 0.0)
+
+        v_n = np.clip(
+            log_matrix_mult(w_l[left_pattern_inverse], p_l)
+            + log_matrix_mult(w_r[right_pattern_inverse], p_r),
+            -1e100,
+            0.0,
+        )
+        return v_n
+
+    return local_score_function_branching
+    # return numba.jit(local_score_function_branching, nopython=False, forceobj=True)
+
+
+def compute_unphased_score_function(*, root, patterns, pattern_counts) -> Callable:
+    # print(f"compute_unphased_score_function({root=},{patterns=},{pattern_counts=})")
+    v_function = compute_unphased_score_function_helper(root, patterns, taxa_indices)
+
+    pis10 = np.array([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+       [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+       [0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+       [0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+       [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+       [0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0]]) @ np.kron(pis,pis)
+
+
+    def score_function(prob_matrices):
+        v = v_function(prob_matrices)
+        return -kahan_dot(pattern_counts, log_dot(v, np.log(pis10)))
+
+    # return numba.jit(score_function, nopython=False, forceobj=True)
+    return score_function
+
+
+################################################################################
+################################################################################
+
+
 match opt.model:
     case "DNA":
         patterns = np.array([pattern for pattern in counts.keys()])
@@ -1170,6 +1207,13 @@ match opt.model:
         score_function = compute_score_function(
             root=true_tree, patterns=patterns, pattern_counts=pattern_counts
         )
+
+
+        def neg_log_likelihood(gtr_params, tree_distances):
+            gtr_prob_model = make_GTR_prob_model(np.concatenate((pis, gtr_params)), vec=True)
+            prob_matrices = gtr_prob_model(tree_distances)
+            return score_function(prob_matrices)
+
     case "PHASED_DNA":
         genotype_counts = defaultdict(lambda: 0)
         for pattern, count in counts.items():
@@ -1185,74 +1229,110 @@ match opt.model:
         score_function = compute_score_function(
             root=true_tree, patterns=patterns, pattern_counts=pattern_counts
         )
+
+
+        def neg_log_likelihood(gtr_params, tree_distances):
+            gtr_prob_model = make_GTR_prob_model(np.concatenate((pis, gtr_params)), vec=True)
+            prob_matrices = gtr_prob_model(tree_distances)
+            return score_function(prob_matrices)
+
     case "UNPHASED_DNA":
-        unphased_idx_to_phased_idcs = {
-            0: (0,),  # "AA"
-            1: (1,),  # "CC"
-            2: (2,),  # "GG"
-            3: (3,),  # "TT"
-            4: (0, 1),  # "AC"
-            5: (0, 2),  # "AG"
-            6: (0, 3),  # "AT"
-            7: (1, 2),  # "CG"
-            8: (1, 3),  # "CT"
-            9: (2, 3),  # "GT"
-            10: (4, 4),  # "??"
-            11: (0, 4),  # "A?"
-            12: (1, 4),  # "C?"
-            13: (2, 4),  # "G?"
-            14: (3, 4),  # "T?"
-        }
-        genotype_counts = defaultdict(lambda: 0.0)
-        for pattern, count in counts.items():
-            pattern_options = [unphased_idx_to_phased_idcs[idx] for idx in pattern]
-            phase_weight = 1 / reduce(mul, map(len, pattern_options), 1)
-            for phase_resolved_pattern in itertools.product(*pattern_options):
-                genotype_counts[phase_resolved_pattern] += phase_weight
+        patterns = np.array([pattern for pattern in counts.keys()])
+        pattern_counts = np.array([count for count in counts.values()])
 
-        patterns = np.array([pattern for pattern in genotype_counts.keys()])
-        pattern_counts = np.array([count for count in genotype_counts.values()])
-
-        score_function = compute_score_function(
+        score_function = compute_unphased_score_function(
             root=true_tree, patterns=patterns, pattern_counts=pattern_counts
         )
+
+
+        def neg_log_likelihood(gtr_params, tree_distances):
+            gtr_prob_model = make_unphased_GTR_prob_model(
+                np.concatenate((pis, gtr_params)), vec=True
+            )
+            prob_matrices = gtr_prob_model(tree_distances)
+            return score_function(prob_matrices)
+
+        # unphased_idx_to_phased_idcs = {
+        #     0: (0,),  # "AA"
+        #     1: (1,),  # "CC"
+        #     2: (2,),  # "GG"
+        #     3: (3,),  # "TT"
+        #     4: (0, 1),  # "AC"
+        #     5: (0, 2),  # "AG"
+        #     6: (0, 3),  # "AT"
+        #     7: (1, 2),  # "CG"
+        #     8: (1, 3),  # "CT"
+        #     9: (2, 3),  # "GT"
+        #     10: (4, 4),  # "??"
+        #     11: (0, 4),  # "A?"
+        #     12: (1, 4),  # "C?"
+        #     13: (2, 4),  # "G?"
+        #     14: (3, 4),  # "T?"
+        # }
+        # genotype_counts = defaultdict(lambda: 0.0)
+        # for pattern, count in counts.items():
+        #     pattern_options = [unphased_idx_to_phased_idcs[idx] for idx in pattern]
+        #     phase_weight = 1 / reduce(mul, map(len, pattern_options), 1)
+        #     for phase_resolved_pattern in itertools.product(*pattern_options):
+        #         genotype_counts[phase_resolved_pattern] += phase_weight
+        #
+        # patterns = np.array([pattern for pattern in genotype_counts.keys()])
+        # pattern_counts = np.array([count for count in genotype_counts.values()])
+        #
+        # score_function = compute_score_function(
+        #     root=true_tree, patterns=patterns, pattern_counts=pattern_counts
+        # )
     case _:
         assert False
 
 
-def neg_log_likelihood(gtr_params, tree_distances):
-    gtr_prob_model = make_GTR_prob_model(np.concatenate((pis, gtr_params)), vec=True)
-    prob_matrices = gtr_prob_model(tree_distances)
-    return score_function(prob_matrices)
-
-
 def full_objective(params, gt_norm=False):
+    """
+    Full objective function.
+
+    :param params: first 6 entries are the GTR params, rest are the branch lengths
+    :param gt_norm: if True, normalize the GT rate to 1
+    :return: loss
+    """
     gtr_params = params[:6]
     tree_distances = params[6:]
     return (
-        (
-            neg_log_likelihood(gtr_params / gtr_params[-1], tree_distances)
-            if gt_norm
-            else neg_log_likelihood(gtr_params, tree_distances)
-        )
-        + ((rate_constraint_matrix @ gtr_params) - 1) ** 2  # fix the rate
-        + tree_distances[0] ** 2  # zero length at root
+            (
+                neg_log_likelihood(gtr_params / gtr_params[-1], tree_distances)
+                if gt_norm
+                else neg_log_likelihood(gtr_params, tree_distances)
+            )
+            + (0 if gt_norm else ((rate_constraint_matrix @ gtr_params) - 1) ** 2)  # fix the rate
+            + tree_distances[0] ** 2  # zero length at root
     )
 
 
 def param_objective(gtr_params, tree_distances, gt_norm=False):
+    """
+    Objective function for GTR parameters.
+
+    :param gtr_params:
+    :param tree_distances: (fixed)
+    :param gt_norm: if True, normalize the GT rate to 1
+    :return: loss
+    """
     return (
         neg_log_likelihood(gtr_params / gtr_params[-1], tree_distances)
         if gt_norm
         else neg_log_likelihood(gtr_params, tree_distances)
     ) + (
-        (rate_constraint_matrix @ gtr_params) - 1
-    ) ** 2  # fix the rate
+        0 if gt_norm else ((rate_constraint_matrix @ gtr_params) - 1) ** 2
+    )  # fix the overall rate, if not normalizing on the GT rate
 
 
-def branch_length_objective(params, gtr_params):
-    gtr_params = s_est
-    tree_distances = params
+def branch_length_objective(tree_distances, gtr_params):
+    """
+    Objective function for branch length estimation.
+
+    :param tree_distances:
+    :param gtr_params: (fixed)
+    :return: loss
+    """
     return (neg_log_likelihood(gtr_params, tree_distances)) + tree_distances[
         0
     ] ** 2  # zero length at root
@@ -1272,6 +1352,7 @@ for _ in range(2):
             if opt.log
             else None
         ),
+        options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
     )
     if opt.log:
         print(res)
@@ -1290,11 +1371,13 @@ for _ in range(2):
             if opt.log
             else None
         ),
+        options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
     )
     if opt.log:
         print(res)
 
-    tree_distances = res.x
+    # belt and suspenders for the constraint (avoid -1e-big type bounds violations)
+    tree_distances = np.maximum(0.0, res.x)
 
 num_func_evals = 0
 res = minimize(
@@ -1307,7 +1390,7 @@ res = minimize(
         if opt.log
         else None
     ),
-    options={"maxiter": 1000, "maxfun": 100_000},
+    options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
 )
 if opt.log:
     print(res)
@@ -1322,6 +1405,7 @@ if not res.success:
     # first, the parameters
     print("optimize parameters")
 
+
     def param_objective(params, gt_norm=False):
         gtr_params = params
         return (
@@ -1329,8 +1413,9 @@ if not res.success:
             if gt_norm
             else neg_log_likelihood(gtr_params, tree_distances)
         ) + (
-            (rate_constraint_matrix @ gtr_params) - 1
+                (rate_constraint_matrix @ gtr_params) - 1
         ) ** 2  # fix the rate
+
 
     num_func_evals = 0
     res = minimize(
@@ -1352,12 +1437,14 @@ if not res.success:
     # next, the branch lengths
     print("optimize branch lengths")
 
+
     def branch_length_objective(params):
         gtr_params = s_est
         tree_distances = params
         return (neg_log_likelihood(gtr_params, tree_distances)) + tree_distances[
             0
         ] ** 2  # zero length at root
+
 
     num_func_evals = 0
     res = minimize(
