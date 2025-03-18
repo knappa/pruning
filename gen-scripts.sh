@@ -84,3 +84,17 @@ do
 done
 
 ~/pruning/pruning.py --seqs diploid-000.phy --tree tree-000.nwk --output reconstructed-tree-000 --model PHASED_DNA --method L-BFGS-B --log
+
+#####
+
+for NSITES in 1000 10000
+do
+  seq -w 0 99 | parallel --line-buffer --jobs 10 -I {} \
+    ~/pruning/pruningv3.py \
+      --seqs data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/diploid-0{}.phy \
+      --tree data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/tree-0{}.nwk \
+      --output data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-unphased-0{} \
+      --model UNPHASED_DNA \
+      --method L-BFGS-B \
+      --log
+done
