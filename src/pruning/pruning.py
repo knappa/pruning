@@ -105,9 +105,7 @@ if (
     print("output files from previous run present, exiting.")
     exit()
 
-model: Literal["DNA", "PHASED_DNA", "UNPHASED_DNA", "CELLPHY", "GTR10Z", "GTR10"] = (
-    opt.model
-)
+model: Literal["DNA", "PHASED_DNA", "UNPHASED_DNA", "CELLPHY", "GTR10Z", "GTR10"] = opt.model
 
 ambig_char = opt.ambig.upper()
 if len(ambig_char) != 1:
@@ -598,7 +596,7 @@ match opt.model:
         prob_model_maker = make_unphased_GTR_prob_model
 
         def pis_modification(pis):
-            return U @ perm @ np.kron(pis,pis)
+            return U @ perm @ np.kron(pis, pis)
 
     case _:
         assert False
@@ -621,7 +619,7 @@ neg_log_likelihood = functools.partial(
         pattern_counts=pattern_counts,
         num_states=num_states,
     ),
-    pis_modification= pis_modification,
+    pis_modification=pis_modification,
 )
 
 
@@ -674,12 +672,19 @@ def full_param_objective(params, tree_distances, gt_norm=False):
     pis = params[:num_pis]
     model_params = params[num_pis:]
     return (
-        neg_log_likelihood(pis, model_params / model_params[-1], tree_distances)
-        if gt_norm
-        else neg_log_likelihood(pis, model_params, tree_distances)
-    ) + (
-        0 if gt_norm else (rate_constraint(pis, model_params) - 1) ** 2
-    )  # fix the overall rate, if not normalizing on the GT rate
+        (
+            neg_log_likelihood(pis, model_params / model_params[-1], tree_distances)
+            if gt_norm
+            else neg_log_likelihood(pis, model_params, tree_distances)
+        )
+        + (
+            0
+            if gt_norm
+            else (rate_constraint(pis, model_params) - 1)
+            ** 2  # fix the overall rate, if not normalizing on the GT rate
+        )
+        + (np.sum(pis) - 1) ** 2
+    )  # should be a probability dist
 
 
 for _ in range(2):
@@ -733,7 +738,7 @@ for _ in range(2):
             np.concatenate((pis_est, s_est)),
             args=(tree_distances,),
             method=opt.method,
-            bounds=[(1e-10, np.inf)] * (num_pis + num_params),
+            bounds=([(1e-6, 1.0 - 1e-6)] * num_pis) + ([(1e-10, np.inf)] * num_params),
             callback=(
                 (callback_ir if opt.method not in {"TNC", "SLSQP", "COBYLA"} else callback_param)
                 if opt.log
@@ -745,6 +750,7 @@ for _ in range(2):
             print(res)
 
         pis_est = np.maximum(0.0, res.x[:num_pis])
+        pis_est /= np.sum(pis_est)  # prob dist
         s_est = np.maximum(0.0, res.x[num_pis:])
         s_est = s_est / rate_constraint(pis_est, s_est)  # fine tune mu
 
@@ -770,7 +776,8 @@ if opt.optimize_freqs:
                 if gt_norm
                 else neg_log_likelihood(pis, model_params, tree_distances)
             )
-            + (0 if gt_norm else ((rate_constraint(pis, model_params) - 1) ** 2))  # fix the rate
+            + (0 if gt_norm else ((rate_constraint(pis, model_params) - 1) ** 2))  # fix the
+            + (np.sum(pis) - 1) ** 2  # should be a probability dist
             + tree_distances[0] ** 2  # zero length at root
         )
 
@@ -779,7 +786,8 @@ if opt.optimize_freqs:
         full_objective,
         np.concatenate((pis_est, s_est, tree_distances)),
         method=opt.method,
-        bounds=[(0.0, np.inf)] * (num_pis + num_params + 2 * len(taxa) - 1),
+        bounds=([(1e-6, 1.0 - 1e-6)] * num_pis)
+        + [(0.0, np.inf)] * (num_params + 2 * len(taxa) - 1),
         callback=(
             (callback_ir if opt.method not in {"TNC", "SLSQP", "COBYLA"} else callback_param)
             if opt.log
@@ -791,9 +799,10 @@ if opt.optimize_freqs:
         print(res)
 
     pis_est = np.maximum(0.0, res.x[:num_pis])
+    pis_est /= np.sum(pis_est)  # prob dist
     s_est = np.maximum(0.0, res.x[num_pis : num_pis + num_params])
     s_est = s_est / rate_constraint(pis_est, s_est)  # fine tune mu
-    tree_distances = np.maximum(0.0, res.x[num_pis + num_params:])
+    tree_distances = np.maximum(0.0, res.x[num_pis + num_params :])
 
 else:
     # optimize everything but the state frequencies
