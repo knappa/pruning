@@ -114,6 +114,7 @@ def print_gtr10_params(s_est, pis_est):
     print()
 
     q_sym_est = Qsym_gtr10(pis_est, s_est)
+    # Q_gtr10 = np.diag([np.sqrt(x) for x in pi10s]) @ Qsym_gtr10 @ np.diag([1/np.sqrt(x) for x in pi10s])
     q_est = (
         np.diag([np.sqrt(x) for x in pis_est])
         @ q_sym_est
@@ -161,10 +162,11 @@ def print_gtr10z_params(s_est, pis_est):
     print()
 
     q_sym_est = Qsym_gtr10z(pis_est, s_est)
+    # Q_gtr10z = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_gtr10z @ np.diag([np.sqrt(x) for x in pi10s])
     q_est = (
-        np.diag([np.sqrt(x) for x in pis_est])
+        np.diag([1 / np.sqrt(x) for x in pis_est])
         @ q_sym_est
-        @ np.diag([1 / np.sqrt(x) for x in pis_est])
+        @ np.diag([np.sqrt(x) for x in pis_est])
     )
     print("Q:")
     for row in q_est:
@@ -200,6 +202,7 @@ def print_cellphy10_params(s_est, pis_est):
     print()
 
     q_sym_est = Qsym_cellphy10(pis_est, s_est)
+    # Q_cellphy10 = np.diag([np.sqrt(x) for x in pi10s]) @ Qsym_cellphy10 @ np.diag([1/np.sqrt(x) for x in pi10s])
     q_est = (
         np.diag([np.sqrt(x) for x in pis_est])
         @ q_sym_est
