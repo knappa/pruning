@@ -20,6 +20,9 @@ def main_cli():
         gtr10_rate,
         gtr10z_rate,
         make_A_GTR,
+        make_cellphy_prob_model,
+        make_gtr10_prob_model,
+        make_gtr10z_prob_model,
         make_GTR_prob_model,
         make_unphased_GTR_prob_model,
         perm,
@@ -186,38 +189,35 @@ def main_cli():
         case "DNA" | "PHASED_DNA" | "UNPHASED_DNA":
 
             num_params = 6
+            pis_est = pis
             rate_constraint = gtr4_rate
             s_est = np.ones(6)
-            s_est = s_est / (rate_constraint(pis, s_est))
-            pis_est = pis
 
         case "CELLPHY":
 
             num_params = 6
+            pis_est = pis10
             rate_constraint = cellphy10_rate
             s_est = np.ones(6)
-            s_est = s_est / (rate_constraint(pis, s_est))
-            pis_est = pis10
 
         case "GTR10Z":
 
             num_params = 24
+            pis_est = pis10
             rate_constraint = gtr10z_rate
             s_est = np.ones(24)
-            s_est = s_est / rate_constraint(pis10, s_est)
-            pis_est = pis10
 
         case "GTR10":
 
             num_params = 45
+            pis_est = pis10
             rate_constraint = gtr10_rate
             s_est = np.ones(45)
-            s_est = s_est / rate_constraint(pis10, s_est)
-            pis_est = pis10
 
         case _:
             assert False, "Unknown model type"
 
+    s_est = s_est / rate_constraint(pis_est, s_est)
     log_pis_est = np.log(pis_est)
     num_pis = len(pis_est)
 
@@ -389,6 +389,35 @@ def main_cli():
                 pis = np.exp(log_pis)
                 return np.log(U @ perm @ np.kron(pis, pis))
 
+        case "CELLPHY":
+            patterns = np.array([pattern for pattern in counts.keys()])
+            pattern_counts = np.array([count for count in counts.values()])
+
+            prob_model_maker = make_cellphy_prob_model
+
+            def log_pis_modification(log_pis):
+                return log_pis
+
+        case "GTR10Z":
+
+            patterns = np.array([pattern for pattern in counts.keys()])
+            pattern_counts = np.array([count for count in counts.values()])
+
+            prob_model_maker = make_gtr10z_prob_model
+
+            def log_pis_modification(log_pis):
+                return log_pis
+
+        case "GTR10":
+
+            patterns = np.array([pattern for pattern in counts.keys()])
+            pattern_counts = np.array([count for count in counts.values()])
+
+            prob_model_maker = make_gtr10_prob_model
+
+            def log_pis_modification(log_pis):
+                return log_pis
+
         case _:
             assert False
 
@@ -401,7 +430,7 @@ def main_cli():
         score_function,
         log_pis_modification,
     ):
-        prob_model = prob_model_maker(pis, model_params, vec=True)
+        prob_model = prob_model_maker(np.exp(log_pis), model_params, vec=True)
         prob_matrices = prob_model(tree_distances)
         return score_function(log_pis_modification(log_pis), prob_matrices)
 
@@ -439,7 +468,6 @@ def main_cli():
     )
 
     for _ in range(2):
-
         res = minimize(
             param_objective,
             s_est,
@@ -597,9 +625,10 @@ def main_cli():
                 print_stats(
                     s_est=s_est,
                     pis_est=pis_est,
-                    res=res,
+                    neg_l=res.fun,
                     tree_distances=tree_distances,
                     true_branch_lens=true_branch_lens,
+                    model=model,
                 )
 
     else:
@@ -608,9 +637,10 @@ def main_cli():
         print_stats(
             s_est=s_est,
             pis_est=pis_est,
-            res=res,
+            neg_l=res.fun,
             tree_distances=tree_distances,
             true_branch_lens=true_branch_lens,
+            model=model,
         )
 
     ################################################################################

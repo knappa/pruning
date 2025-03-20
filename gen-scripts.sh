@@ -3,8 +3,6 @@
 # for SEQ_ERR in 0.00 0.01 0.05 0.10
 # for ADO in 0.00 0.10 0.25 0.50
 
-SEQ_ERR=0.00
-ADO=0.00
 
 # 1969  ~/pruning/cellcoal-modified/bin/cellcoal-1.3.0 -K4 -L0.2
 # 1971  ~/pruning/cellcoal-modified/bin/cellcoal-1.3.0 -K4 -L0.2 -u1e-4 -e1e5
@@ -23,6 +21,8 @@ ADO=0.00
 
 #for NSITES in 1000 10000 100000
 
+SEQ_ERR=0.00
+ADO=0.00
 for NSITES in 1000 10000
 do
   mkdir diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO";
@@ -71,6 +71,8 @@ done
 
 #for NSITES in 1000 10000 100000
 
+SEQ_ERR=0.00
+ADO=0.00
 for NSITES in 1000 10000
 do
   seq -w 0 99 | parallel --line-buffer --jobs 15 -I {} \
@@ -87,14 +89,61 @@ done
 
 #####
 
+SEQ_ERR=0.00
+ADO=0.00
 for NSITES in 1000 10000
 do
   seq -w 0 99 | parallel --line-buffer --jobs 10 -I {} \
-    ~/pruning/pruningv3.py \
+    pruning \
       --seqs data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/diploid-0{}.phy \
       --tree data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/tree-0{}.nwk \
       --output data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-unphased-0{} \
       --model UNPHASED_DNA \
+      --method L-BFGS-B \
+      --log
+done
+
+
+SEQ_ERR=0.00
+ADO=0.00
+for NSITES in 1000 10000
+do
+  seq -w 0 99 | parallel --line-buffer --jobs 10 -I {} \
+    pruning \
+      --seqs data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/diploid-0{}.phy \
+      --tree data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/tree-0{}.nwk \
+      --output data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-cellphy-0{} \
+      --model CELLPHY \
+      --method L-BFGS-B \
+      --log
+done
+
+
+SEQ_ERR=0.00
+ADO=0.00
+for NSITES in 1000 10000
+do
+  seq -w 0 99 | parallel --line-buffer --jobs 10 -I {} \
+    pruning \
+      --seqs data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/diploid-0{}.phy \
+      --tree data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/tree-0{}.nwk \
+      --output data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-gtr10z-0{} \
+      --model GTR10Z \
+      --method L-BFGS-B \
+      --log
+done
+
+
+SEQ_ERR=0.00
+ADO=0.00
+for NSITES in 1000 10000
+do
+  seq -w 0 99 | parallel --line-buffer --jobs 10 -I {} \
+    pruning \
+      --seqs data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/diploid-0{}.phy \
+      --tree data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/tree-0{}.nwk \
+      --output data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-gtr10-0{} \
+      --model GTR10 \
       --method L-BFGS-B \
       --log
 done

@@ -2,80 +2,77 @@ import numba
 import numpy as np
 
 perm = np.array(
+    # fmt: off
+    # @formatter:off
     [
-        # fmt: off
-        # @formatter:off
         # AA, CC, GG, TT, AC, CA, AG, GA, AT, TA, CG, GC, CT, TC, GT, TG
-        [  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # AA
-        [  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # AC
-        [  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0], # AG
-        [  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0], # AT
-        [  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # CA
-        [  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # CC
-        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0], # CG
-        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0], # CT
-        [  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0], # GA
-        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0], # GC
-        [  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # GG
-        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0], # GT
-        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0], # TA
-        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0], # TC
-        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1], # TG
-        [  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-        # TT
-        # @formatter:on
-        # fmt: on
+        [  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # AA
+        [  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # AC
+        [  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # AG
+        [  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0],  # AT
+        [  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # CA
+        [  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # CC
+        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0],  # CG
+        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0],  # CT
+        [  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0],  # GA
+        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0],  # GC
+        [  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # GG
+        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0],  # GT
+        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0],  # TA
+        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0],  # TC
+        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1],  # TG
+        [  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # TT
     ],
+    # @formatter:on
+    # fmt: on
     dtype=np.int64,
 )
 
 U = np.array(
+    # fmt: off
+    # @formatter:off
     [
-        # fmt: off
-        # @formatter:off
         # AA, CC, GG, TT, AC, CA, AG, GA, AT, TA, CG, GC, CT, TC, GT, TG
-        [  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # AA
-        [  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # CC
-        [  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # GG
-        [  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # TT
-        [  0,  0,  0,  0,  1,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # AC
-        [  0,  0,  0,  0,  0,  0,  1,  1,  0,  0,  0,  0,  0,  0,  0,  0], # AG
-        [  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  0,  0,  0,  0,  0,  0], # AT 
-        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  0,  0,  0,  0], # CG
-        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  0,  0], # CT
-        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1],
-        # GT
-        # @formatter:on
-        # fmt: on
+        [  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # AA
+        [  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # CC
+        [  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # GG
+        [  0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # TT
+        [  0,  0,  0,  0,  1,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],  # AC
+        [  0,  0,  0,  0,  0,  0,  1,  1,  0,  0,  0,  0,  0,  0,  0,  0],  # AG
+        [  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  0,  0,  0,  0,  0,  0],  # AT
+        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  0,  0,  0,  0],  # CG
+        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  0,  0],  # CT
+        [  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1],  # GT
     ],
+    # @formatter:on
+    # fmt: on
     dtype=np.int64,
 )
 # V = np.linalg.pinv(U)
 V = np.array(
+    # fmt: off
+    # @formatter:off
     [
-        # fmt: off
-        # @formatter:off
         # AA , CC ,  GG ,  TT ,  AC , AG ,  AT ,  CG , CT , GT
-        [  1.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0. , 0. ], # AA
-        [  0.,  1.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0. , 0. ], # CC
-        [  0.,  0.,   1.,   0.,  0. , 0. ,  0. ,  0. , 0. , 0. ], # GG
-        [  0.,  0.,   0.,   1.,  0. , 0. ,  0. ,  0. , 0. , 0. ], # TT
-        [  0.,  0.,   0.,   0.,  0.5, 0. ,  0. ,  0. , 0. , 0. ], # AC
-        [  0.,  0.,   0.,   0.,  0.5, 0. ,  0. ,  0. , 0. , 0. ], # CA
-        [  0.,  0.,   0.,   0.,  0. , 0.5,  0. ,  0. , 0. , 0. ], # AG
-        [  0.,  0.,   0.,   0.,  0. , 0.5,  0. ,  0. , 0. , 0. ], # GA
-        [  0.,  0.,   0.,   0.,  0. , 0. ,  0.5,  0. , 0. , 0. ], # AT
-        [  0.,  0.,   0.,   0.,  0. , 0. ,  0.5,  0. , 0. , 0. ], # TA
-        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0.5, 0. , 0. ], # CG
-        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0.5, 0. , 0. ], # GC
-        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0.5, 0. ], # CT
-        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0.5, 0. ], # TA
-        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0. , 0.5], # GT
-        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0. , 0.5],
-        # TG
-        # @formatter:on
-        # fmt: on
+        [  1.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0. , 0. ],  # AA
+        [  0.,  1.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0. , 0. ],  # CC
+        [  0.,  0.,   1.,   0.,  0. , 0. ,  0. ,  0. , 0. , 0. ],  # GG
+        [  0.,  0.,   0.,   1.,  0. , 0. ,  0. ,  0. , 0. , 0. ],  # TT
+        [  0.,  0.,   0.,   0.,  0.5, 0. ,  0. ,  0. , 0. , 0. ],  # AC
+        [  0.,  0.,   0.,   0.,  0.5, 0. ,  0. ,  0. , 0. , 0. ],  # CA
+        [  0.,  0.,   0.,   0.,  0. , 0.5,  0. ,  0. , 0. , 0. ],  # AG
+        [  0.,  0.,   0.,   0.,  0. , 0.5,  0. ,  0. , 0. , 0. ],  # GA
+        [  0.,  0.,   0.,   0.,  0. , 0. ,  0.5,  0. , 0. , 0. ],  # AT
+        [  0.,  0.,   0.,   0.,  0. , 0. ,  0.5,  0. , 0. , 0. ],  # TA
+        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0.5, 0. , 0. ],  # CG
+        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0.5, 0. , 0. ],  # GC
+        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0.5, 0. ],  # CT
+        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0.5, 0. ],  # TA
+        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0. , 0.5],  # GT
+        [  0.,  0.,   0.,   0.,  0. , 0. ,  0. ,  0. , 0. , 0.5],  # TG
     ],
+    # @formatter:on
+    # fmt: on
     dtype=np.float64,
 )
 
@@ -83,9 +80,9 @@ V = np.array(
 def make_A_GTR(pis):
     pi_a, pi_c, pi_g, pi_t = pis
     return np.array(
+        # fmt: off
+        # @formatter:off
         [
-            # fmt: off
-            # @formatter:off
             #  s_ac   s_ag   s_at   s_cg   s_ct   s_gt
             # row 1
             [-pi_c, -pi_g, -pi_t,     0,     0,     0],
@@ -107,18 +104,18 @@ def make_A_GTR(pis):
             [    0,     0,     0,     0,  pi_c,     0],
             [    0,     0,     0,     0,     0,  pi_g],
             [    0,     0, -pi_a,     0, -pi_c, -pi_g],
-            # @formatter:on
-            # fmt: on
         ]
+        # @formatter:on
+        # fmt: on
     )
 
 
 def make_A_GTR16(pis):
     pi_a, pi_c, pi_g, pi_t = pis
     return np.array(
+        # fmt: off
+        # @formatter:off
         [
-            # fmt: off
-            # @formatter:off
             # s_ac         , s_ag         , s_at         , s_cg         , s_ct         , s_gt
             [ -2 * pi_c    , -2 * pi_g    , -2 * pi_t    , 0            , 0            , 0            ],
             [ pi_c         , 0            , 0            , 0            , 0            , 0            ],
@@ -376,9 +373,9 @@ def make_A_GTR16(pis):
             [ 0            , 0            , 0            , 0            , pi_c         , 0            ],
             [ 0            , 0            , 0            , 0            , 0            , pi_g         ],
             [ 0            , 0            , -2 * pi_a    , 0            , -2 * pi_c    , -2 * pi_g    ],
-            # @formatter:on
-            # fmt: on
         ],
+        # @formatter:on
+        # fmt: on
         dtype=np.float64,
     )
 
@@ -1157,6 +1154,21 @@ def Qsym_gtr10(pi10s, s_is):
     )
 
 
+def make_gtr10_prob_model(pis, model_params, *, vec=False):
+    # print(f"make_gtr10_prob_model({pis=},{model_params=},{vec=})")
+    sym_Q = Qsym_gtr10(pis, model_params)
+    evals, sym_evecs = np.linalg.eigh(sym_Q)
+
+    # Q_gtr10 = np.diag([np.sqrt(x) for x in pi10s]) @ Qsym_gtr10 @ np.diag([1/np.sqrt(x) for x in pi10s])
+    left = sym_evecs * np.sqrt(pis)[:, None]
+    right = sym_evecs.T / np.sqrt(pis)
+
+    if vec:
+        return lambda t: prob_model_helper_vec(t, left, right, evals)
+    else:
+        return lambda t: prob_model_helper(t, left, right, evals)
+
+
 ####################################################################################################
 
 
@@ -1366,6 +1378,21 @@ def Qsym_gtr10z(pi10s, s_is):
     )
 
 
+def make_gtr10z_prob_model(pis, model_params, *, vec=False):
+    # print(f"make_gtr10z_prob_model({pis=},{model_params=},{vec=})")
+    sym_Q = Qsym_gtr10z(pis, model_params)
+    evals, sym_evecs = np.linalg.eigh(sym_Q)
+
+    # Q_gtr10z = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_gtr10z @ np.diag([np.sqrt(x) for x in pi10s])
+    left = sym_evecs / np.sqrt(pis)[:, None]
+    right = sym_evecs.T * np.sqrt(pis)
+
+    if vec:
+        return lambda t: prob_model_helper_vec(t, left, right, evals)
+    else:
+        return lambda t: prob_model_helper(t, left, right, evals)
+
+
 ####################################################################################################
 
 
@@ -1517,6 +1544,21 @@ def Qsym_cellphy10(pi10s, s_is):
         ],
         dtype=np.float64,
     )
+
+
+def make_cellphy_prob_model(pis, model_params, *, vec=False):
+    # print(f"make_cellphy_prob_model({pis=},{model_params=},{vec=})")
+    sym_Q = Qsym_cellphy10(pis, model_params)
+    evals, sym_evecs = np.linalg.eigh(sym_Q)
+
+    # Q_cellphy10 = np.diag([np.sqrt(x) for x in pi10s]) @ Qsym_cellphy10 @ np.diag([1/np.sqrt(x) for x in pi10s])
+    left = sym_evecs * np.sqrt(pis)[:, None]
+    right = sym_evecs.T / np.sqrt(pis)
+
+    if vec:
+        return lambda t: prob_model_helper_vec(t, left, right, evals)
+    else:
+        return lambda t: prob_model_helper(t, left, right, evals)
 
 
 ####################################################################################################
