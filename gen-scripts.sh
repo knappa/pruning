@@ -118,6 +118,21 @@ do
       --log
 done
 
+SEQ_ERR=0.00
+ADO=0.00
+for NSITES in 1000 10000
+do
+  seq -w 0 99 | parallel --line-buffer --jobs 10 -I {} \
+    pruning \
+      --seqs data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/diploid-0{}.phy \
+      --tree data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/tree-0{}.nwk \
+      --output data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-cellphy-pi-0{} \
+      --model CELLPHY \
+      --optimize_freqs \
+      --method L-BFGS-B \
+      --log
+done
+
 
 SEQ_ERR=0.00
 ADO=0.00
