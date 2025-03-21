@@ -15,14 +15,14 @@ from ete3 import Tree
 from scipy.optimize import OptimizeResult, minimize
 
 from matrices import (
-    U,
+    V,
     cellphy10_rate,
     gtr4_rate,
     gtr10_rate,
     gtr10z_rate,
     make_A_GTR,
     make_GTR_prob_model,
-    make_unphased_GTR_prob_model,
+    make_unphased_GTRsq_prob_model,
     perm,
 )
 from path_constraints import make_path_constraints
@@ -279,7 +279,7 @@ with open(opt.seqs, "r") as seq_file:
 pis = base_freq_counts / np.sum(base_freq_counts)
 pi_a, pi_c, pi_g, pi_t = pis
 pis16 = np.kron(pis, pis)
-pis10 = U @ perm @ pis16
+pis10 = V @ perm @ pis16
 
 assert set(true_tree.get_leaf_names()) == set(
     sequences.keys()
@@ -593,10 +593,10 @@ match opt.model:
         patterns = np.array([pattern for pattern in counts.keys()])
         pattern_counts = np.array([count for count in counts.values()])
 
-        prob_model_maker = make_unphased_GTR_prob_model
+        prob_model_maker = make_unphased_GTRsq_prob_model
 
         def pis_modification(pis):
-            return U @ perm @ np.kron(pis, pis)
+            return V @ perm @ np.kron(pis, pis)
 
     case _:
         assert False

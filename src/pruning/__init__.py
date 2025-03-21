@@ -24,7 +24,7 @@ def main_cli():
         make_gtr10_prob_model,
         make_gtr10z_prob_model,
         make_GTR_prob_model,
-        make_unphased_GTR_prob_model,
+        make_unphased_GTRsq_prob_model,
         perm,
     )
     from pruning.objective_functions import (
@@ -383,7 +383,7 @@ def main_cli():
             patterns = np.array([pattern for pattern in counts.keys()])
             pattern_counts = np.array([count for count in counts.values()])
 
-            prob_model_maker = make_unphased_GTR_prob_model
+            prob_model_maker = make_unphased_GTRsq_prob_model
 
             def log_pis_modification(log_pis):
                 pis = np.exp(log_pis)
