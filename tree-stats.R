@@ -3,7 +3,7 @@ args <- commandArgs(trailingOnly = TRUE)
 print(args)
 
 directory <- args[1]
-count <- args[2]
+count <- strtoi(args[2])
 
 library(ape)
 library(TreeDist)
@@ -64,4 +64,8 @@ for (model.idx in seq_along(models)) {
   }
 }
 
-write.csv(df, "output.csv", row.names = FALSE)
+write.csv(df, paste(
+  directory,
+  "/tree-stats-output.csv",
+  sep = ""
+), row.names = FALSE)

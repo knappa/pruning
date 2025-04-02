@@ -34,6 +34,7 @@ parser.add_argument("--amp_err_mean", type=float, required=True, help="Amplifica
 parser.add_argument("--amp_err_var", type=float, required=True, help="Amplification error variance")
 parser.add_argument("--seq_err", type=float, required=True, help="Sequencing error")
 parser.add_argument("--gamma", type=float, required=False, help="Rate var sites Gamma")
+parser.add_argument("--delete_vcf", action="store_true", help="Delete generated VCF files")
 parser.add_argument(
     "--base_freqs",
     type=float,
@@ -158,8 +159,7 @@ AMPLIFICATION_ERROR = [
 #
 
 
-DELETE_VCF_FILES = True
-
+DELETE_VCF_FILES = opt.delete_vcf if hasattr(opt,'delete_vcf') else False
 
 # reference for cell coal command line parameters:
 # https://dapogon.github.io/cellcoal/cellcoal.manual.v1.1.html#67_parameter_file_name_at_the_command_line
@@ -404,11 +404,11 @@ for biopsy_number in range(NUM_SAMPLES):
 
     NEXUS_DIR = f"{os.getcwd()}/{FILENAME_PREFIX}-nexus-files"
 
-    if os.path.isdir(NEXUS_DIR) or os.path.isfile(NEXUS_DIR):
-        try:
-            shutil.rmtree(NEXUS_DIR)
-        except Exception as e:
-            print(e)
+    # if os.path.isdir(NEXUS_DIR) or os.path.isfile(NEXUS_DIR):
+    #     try:
+    #         shutil.rmtree(NEXUS_DIR)
+    #     except Exception as e:
+    #         print(e)
 
     os.mkdir(NEXUS_DIR)
 
