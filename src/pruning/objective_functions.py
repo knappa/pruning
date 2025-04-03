@@ -1,3 +1,6 @@
+from typing import Union
+
+
 def rate_param_objective_prototype(
     rate_params,
     log_freq_params,
@@ -6,6 +9,7 @@ def rate_param_objective_prototype(
     gt_norm=False,
     neg_log_likelihood,
     rate_constraint,
+    ploidy: Union[int, float],
 ):
     """
     Objective function for rate parameters.
@@ -16,6 +20,7 @@ def rate_param_objective_prototype(
     :param gt_norm: if True, normalize the GT rate to 1
     :param neg_log_likelihood:
     :param rate_constraint:
+    :param ploidy:
     :return: loss
     """
     import numpy as np
@@ -24,9 +29,11 @@ def rate_param_objective_prototype(
         loss = neg_log_likelihood(log_freq_params, rate_params / rate_params[-1], branch_lengths)
         loss += (rate_params[-1] - 1) ** 2
     else:
-        loss = neg_log_likelihood(log_freq_params, rate_params, branch_lengths)
+        rate_constraint_val = rate_constraint(np.exp(log_freq_params), rate_params)
+        rate_params_corrected = rate_params * ploidy / rate_constraint_val
+        loss = neg_log_likelihood(log_freq_params, rate_params_corrected, branch_lengths)
         # fix the overall rate, if not normalizing on the GT rate
-        loss += (rate_constraint(np.exp(log_freq_params), rate_params) - 1) ** 2
+        loss += (rate_constraint_val - ploidy) ** 2
     return loss
 
 
@@ -56,6 +63,7 @@ def param_objective_prototype(
     num_freq_params: int,
     neg_log_likelihood,
     rate_constraint,
+    ploidy: Union[int, float],
 ):
     """
     Objective function for rate parameters + frequencies holding branch lengths fixed
@@ -66,6 +74,7 @@ def param_objective_prototype(
     :param num_freq_params:
     :param neg_log_likelihood:
     :param rate_constraint:
+    :param ploidy:
     :return: loss
     """
     import numpy as np
@@ -78,9 +87,11 @@ def param_objective_prototype(
         loss = neg_log_likelihood(log_freq_params, rate_params / rate_params[-1], branch_lengths)
         loss += (rate_params[-1] - 1) ** 2
     else:
-        loss = neg_log_likelihood(log_freq_params, rate_params, branch_lengths)
+        rate_constraint_val = rate_constraint(np.exp(log_freq_params), rate_params)
+        rate_params_corrected = rate_params * ploidy / rate_constraint_val
+        loss = neg_log_likelihood(log_freq_params, rate_params_corrected, branch_lengths)
         # fix the overall rate, if not normalizing on the GT rate
-        loss += (rate_constraint(np.exp(log_freq_params), rate_params) - 1) ** 2
+        loss += (rate_constraint_val - ploidy) ** 2
     # should be a probability dist
     # noinspection PyTypeChecker
     loss += logsumexp(log_freq_params, return_sign=False) ** 2
@@ -95,6 +106,7 @@ def full_objective_prototype(
     num_rate_params: int,
     neg_log_likelihood,
     rate_constraint,
+    ploidy: Union[int, float],
 ):
     """
     Full objective function.
@@ -105,6 +117,7 @@ def full_objective_prototype(
     :param num_rate_params:
     :param neg_log_likelihood:
     :param rate_constraint:
+    :param ploidy:
     :return: loss
     """
     import numpy as np
@@ -118,9 +131,11 @@ def full_objective_prototype(
         loss = neg_log_likelihood(log_freq_params, rate_params / rate_params[-1], branch_lengths)
         loss += (rate_params[-1] - 1) ** 2
     else:
-        loss = neg_log_likelihood(log_freq_params, rate_params, branch_lengths)
+        rate_constraint_val = rate_constraint(np.exp(log_freq_params), rate_params)
+        rate_params_corrected = rate_params * ploidy / rate_constraint_val
+        loss = neg_log_likelihood(log_freq_params, rate_params_corrected, branch_lengths)
         # fix the rate
-        loss += (rate_constraint(np.exp(log_freq_params), rate_params) - 1) ** 2
+        loss += (rate_constraint_val - ploidy) ** 2
 
     # should be a probability dist
     # noinspection PyTypeChecker
@@ -133,7 +148,14 @@ def full_objective_prototype(
 
 
 def rates_distances_objective_prototype(
-    params, log_freq_params, *, gt_norm=False, num_params, neg_log_likelihood, rate_constraint
+    params,
+    log_freq_params,
+    *,
+    gt_norm=False,
+    num_params,
+    neg_log_likelihood,
+    rate_constraint,
+    ploidy: Union[int, float],
 ):
     """
     Objective function for holding the frequency parameters constant
@@ -144,19 +166,22 @@ def rates_distances_objective_prototype(
     :param num_params:
     :param neg_log_likelihood:
     :param rate_constraint:
+    :param ploidy:
     :return: loss
     """
     import numpy as np
 
-    model_params = params[:num_params]
-    tree_distances = params[num_params:]
+    rate_params = params[:num_params]
+    branch_lengths = params[num_params:]
 
     if gt_norm:
-        loss = neg_log_likelihood(log_freq_params, model_params / model_params[-1], tree_distances)
-        loss += (model_params[-1] - 1) ** 2  # fix the rate
+        loss = neg_log_likelihood(log_freq_params, rate_params / rate_params[-1], branch_lengths)
+        loss += (rate_params[-1] - 1) ** 2  # fix the rate
     else:
-        loss = neg_log_likelihood(log_freq_params, model_params, tree_distances)
-        loss += (rate_constraint(np.exp(log_freq_params), model_params) - 1) ** 2  # fix the rate
+        rate_constraint_val = rate_constraint(np.exp(log_freq_params), rate_params)
+        rate_params_corrected = rate_params * ploidy / rate_constraint_val
+        loss = neg_log_likelihood(log_freq_params, rate_params_corrected, branch_lengths)
+        loss += (rate_constraint_val - ploidy) ** 2  # fix the rate
 
-    loss += tree_distances[0] ** 2  # zero length at root
+    loss += branch_lengths[0] ** 2  # zero length at root
     return loss

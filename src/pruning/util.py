@@ -224,7 +224,7 @@ def print_stats(*, rate_params, freq_params, neg_l, tree_distances, true_branch_
     print()
 
     match model:
-        case "DNA" | "PHASED_DNA" | "UNPHASED_DNA":
+        case "DNA" | "PHASED_DNA4":
             print_dna_params(rate_params, freq_params)
         case "CELLPHY":
             print_cellphy10_params(rate_params, freq_params)
@@ -232,6 +232,12 @@ def print_stats(*, rate_params, freq_params, neg_l, tree_distances, true_branch_
             print_gtr10z_params(rate_params, freq_params)
         case "GTR10":
             print_gtr10_params(rate_params, freq_params)
+        # case "UNPHASED_DNA":
+        #     pass
+        # case "PHASED_DNA16":
+        #     pass
+        # case "PHASED_DNA16_MP":
+        #     pass
         # case "SIEVE":
         #     # TODO: per model code
         #     pass
@@ -260,3 +266,8 @@ def print_stats(*, rate_params, freq_params, neg_l, tree_distances, true_branch_
     print(f"max rel error: {np.max(rel_error) if len(rel_error) > 0 else float('nan')}")
     print(f"mean rel error: {np.mean(rel_error) if len(rel_error) > 0 else float('nan')}")
     print(f"stdev rel error: {np.std(rel_error) if len(rel_error) > 0 else float('nan')}")
+
+
+def rate_param_cleanup(x, log_freq_params, ploidy, rate_constraint):
+    rate_params = np.maximum(0.0, x)
+    return rate_params * ploidy / rate_constraint(np.exp(log_freq_params), rate_params)

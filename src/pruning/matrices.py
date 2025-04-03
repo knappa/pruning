@@ -160,12 +160,12 @@ def make_A_GTR(pis):
 
 def gtr4_rate(pis, s_is):
     pi_a, pi_c, pi_g, pi_t = pis
-    s_1, s_2, s_3, s_4, s_5, s_6 = s_is
+    s_ac, s_ag, s_at, s_cg, s_ct, s_gt = s_is
     # fmt: off
     # @formatter:off
     return 2 * (
-          pi_a * pi_c * s_1 + pi_a * pi_g * s_2 + pi_a * pi_t * s_3
-        + pi_c * pi_g * s_4 + pi_c * pi_t * s_5 + pi_g * pi_t * s_6
+          pi_a * pi_c * s_ac + pi_a * pi_g * s_ag + pi_a * pi_t * s_at
+        + pi_c * pi_g * s_cg + pi_c * pi_t * s_ct + pi_g * pi_t * s_gt
     )
     # @formatter:on
     # fmt: on
@@ -182,13 +182,11 @@ def phased_mp_rate(pis, s_is):
     ( s_ac_m, s_ag_m, s_at_m, s_cg_m, s_ct_m, s_gt_m,
       s_ac_p, s_ag_p, s_at_p, s_cg_p, s_ct_p, s_gt_p) = s_is
 
-    return 4 * (
-          (pi_a_m + pi_c_m) * s_ac_m + (pi_a_p + pi_c_p) * s_ac_p
-        + (pi_a_m + pi_g_m) * s_ag_m + (pi_a_p + pi_g_p) * s_ag_p
-        + (pi_a_m + pi_t_m) * s_at_m + (pi_a_p + pi_t_p) * s_at_p
-        + (pi_c_m + pi_g_m) * s_cg_m + (pi_c_p + pi_g_p) * s_cg_p
-        + (pi_c_m + pi_t_m) * s_ct_m + (pi_c_p + pi_t_p) * s_ct_p
-        + (pi_g_m + pi_t_m) * s_gt_m + (pi_g_p + pi_t_p) * s_gt_p
+    return 2 * (
+          pi_a_m * pi_c_m * s_ac_m + pi_a_m * pi_g_m * s_ag_m + pi_a_m * pi_t_m * s_at_m
+        + pi_c_m * pi_g_m * s_cg_m + pi_c_m * pi_t_m * s_ct_m + pi_g_m * pi_t_m * s_gt_m
+        + pi_a_p * pi_c_p * s_ac_p + pi_a_p * pi_g_p * s_ag_p + pi_a_p * pi_t_p * s_at_p
+        + pi_c_p * pi_g_p * s_cg_p + pi_c_p * pi_t_p * s_ct_p + pi_g_p * pi_t_p * s_gt_p
     )
     # @formatter:on
     # fmt: on
@@ -600,13 +598,13 @@ def phased_rate(pis, s_is):
     pi_a, pi_c, pi_g, pi_t = (np.sum(square_pi, axis=1) + np.sum(square_pi, axis=0)) / 2
     s_ac, s_ag, s_at, s_cg, s_ct, s_gt = s_is
 
-    return 8 * (
-        (pi_a + pi_c) * s_ac
-        + (pi_a + pi_g) * s_ag
-        + (pi_a + pi_t) * s_at
-        + (pi_c + pi_g) * s_cg
-        + (pi_c + pi_t) * s_ct
-        + (pi_g + pi_t) * s_gt
+    return 4 * (
+        pi_a * pi_c * s_ac
+        + pi_a * pi_g * s_ag
+        + pi_a * pi_t * s_at
+        + pi_c * pi_g * s_cg
+        + pi_c * pi_t * s_ct
+        + pi_g * pi_t * s_gt
     )
 
 
@@ -935,19 +933,19 @@ def gtr10_rate(pi10s, s_is):
         s_16, s_17, s_18, s_19, s_20, s_21, s_22, s_23, s_24, s_25, s_26, s_27, s_28, s_29, s_30,
         s_31, s_32, s_33, s_34, s_35, s_36, s_37, s_38, s_39, s_40, s_41, s_42, s_43, s_44, s_45,
     ) = s_is
-    return (
-          (pi_aa + pi_cc) * s_1  + (pi_aa + pi_gg) * s_2  + (pi_aa + pi_tt) * s_3  + (pi_aa + pi_ac) * s_4
-        + (pi_aa + pi_ag) * s_5  + (pi_aa + pi_at) * s_6  + (pi_aa + pi_cg) * s_7  + (pi_aa + pi_ct) * s_8
-        + (pi_aa + pi_gt) * s_9  + (pi_cc + pi_gg) * s_10 + (pi_cc + pi_tt) * s_11 + (pi_ac + pi_cc) * s_12
-        + (pi_ag + pi_cc) * s_13 + (pi_at + pi_cc) * s_14 + (pi_cc + pi_cg) * s_15 + (pi_cc + pi_ct) * s_16
-        + (pi_cc + pi_gt) * s_17 + (pi_gg + pi_tt) * s_18 + (pi_ac + pi_gg) * s_19 + (pi_ag + pi_gg) * s_20
-        + (pi_at + pi_gg) * s_21 + (pi_cg + pi_gg) * s_22 + (pi_ct + pi_gg) * s_23 + (pi_gg + pi_gt) * s_24
-        + (pi_ac + pi_tt) * s_25 + (pi_ag + pi_tt) * s_26 + (pi_at + pi_tt) * s_27 + (pi_cg + pi_tt) * s_28
-        + (pi_ct + pi_tt) * s_29 + (pi_gt + pi_tt) * s_30 + (pi_ac + pi_ag) * s_31 + (pi_ac + pi_at) * s_32
-        + (pi_ac + pi_cg) * s_33 + (pi_ac + pi_ct) * s_34 + (pi_ac + pi_gt) * s_35 + (pi_ag + pi_at) * s_36
-        + (pi_ag + pi_cg) * s_37 + (pi_ag + pi_ct) * s_38 + (pi_ag + pi_gt) * s_39 + (pi_at + pi_cg) * s_40
-        + (pi_at + pi_ct) * s_41 + (pi_at + pi_gt) * s_42 + (pi_cg + pi_ct) * s_43 + (pi_cg + pi_gt) * s_44
-        + (pi_ct + pi_gt) * s_45
+    return 2 * (
+          pi_aa * pi_cc * s_1  + pi_aa * pi_gg * s_2  + pi_aa * pi_tt * s_3  + pi_aa * pi_ac * s_4
+        + pi_aa * pi_ag * s_5  + pi_aa * pi_at * s_6  + pi_aa * pi_cg * s_7  + pi_aa * pi_ct * s_8
+        + pi_aa * pi_gt * s_9  + pi_cc * pi_gg * s_10 + pi_cc * pi_tt * s_11 + pi_ac * pi_cc * s_12
+        + pi_ag * pi_cc * s_13 + pi_at * pi_cc * s_14 + pi_cc * pi_cg * s_15 + pi_cc * pi_ct * s_16
+        + pi_cc * pi_gt * s_17 + pi_gg * pi_tt * s_18 + pi_ac * pi_gg * s_19 + pi_ag * pi_gg * s_20
+        + pi_at * pi_gg * s_21 + pi_cg * pi_gg * s_22 + pi_ct * pi_gg * s_23 + pi_gg * pi_gt * s_24
+        + pi_ac * pi_tt * s_25 + pi_ag * pi_tt * s_26 + pi_at * pi_tt * s_27 + pi_cg * pi_tt * s_28
+        + pi_ct * pi_tt * s_29 + pi_gt * pi_tt * s_30 + pi_ac * pi_ag * s_31 + pi_ac * pi_at * s_32
+        + pi_ac * pi_cg * s_33 + pi_ac * pi_ct * s_34 + pi_ac * pi_gt * s_35 + pi_ag * pi_at * s_36
+        + pi_ag * pi_cg * s_37 + pi_ag * pi_ct * s_38 + pi_ag * pi_gt * s_39 + pi_at * pi_cg * s_40
+        + pi_at * pi_ct * s_41 + pi_at * pi_gt * s_42 + pi_cg * pi_ct * s_43 + pi_cg * pi_gt * s_44
+        + pi_ct * pi_gt * s_45
     )
     # @formatter:on
     # fmt: on
@@ -1195,37 +1193,20 @@ def gtr10z_rate(pi10s, s_is):
     # fmt: off
     # @formatter:off
     (
-        s_1,  s_2,  s_3,  s_4,  s_5,  s_6,  s_7,  s_8,  s_9, s_10, s_11, s_12, s_13, s_14, s_15,
-        s_16, s_17, s_18, s_19, s_20, s_21, s_22, s_23, s_24
+        s_1 , s_2 , s_3 , s_4 , s_5 , s_6 , s_7 , s_8 , s_9 , s_10,
+        s_11, s_12, s_13, s_14, s_15, s_16, s_17, s_18, s_19, s_20,
+        s_21, s_22, s_23, s_24
     ) = s_is
+    return 2 * (
+          pi_aa * pi_ac * s_1  + pi_aa * pi_ag * s_2  + pi_aa * pi_at * s_3  + pi_ac * pi_cc * s_4
+        + pi_cc * pi_cg * s_5  + pi_cc * pi_ct * s_6  + pi_ag * pi_gg * s_7  + pi_cg * pi_gg * s_8
+        + pi_gg * pi_gt * s_9  + pi_at * pi_tt * s_10 + pi_ct * pi_tt * s_11 + pi_gt * pi_tt * s_12
+        + pi_ac * pi_ag * s_13 + pi_ac * pi_at * s_14 + pi_ac * pi_cg * s_15 + pi_ac * pi_ct * s_16
+        + pi_ag * pi_at * s_17 + pi_ag * pi_cg * s_18 + pi_ag * pi_gt * s_19 + pi_at * pi_ct * s_20
+        + pi_at * pi_gt * s_21 + pi_cg * pi_ct * s_22 + pi_cg * pi_gt * s_23 + pi_ct * pi_gt * s_24
+    )
     # @formatter:on
     # fmt: on
-    return (
-        (pi_aa + pi_ac) * s_1
-        + (pi_aa + pi_ag) * s_2
-        + (pi_aa + pi_at) * s_3
-        + (pi_ac + pi_cc) * s_4
-        + (pi_cc + pi_cg) * s_5
-        + (pi_cc + pi_ct) * s_6
-        + (pi_ag + pi_gg) * s_7
-        + (pi_cg + pi_gg) * s_8
-        + (pi_gg + pi_gt) * s_9
-        + (pi_at + pi_tt) * s_10
-        + (pi_ct + pi_tt) * s_11
-        + (pi_gt + pi_tt) * s_12
-        + (pi_ac + pi_ag) * s_13
-        + (pi_ac + pi_at) * s_14
-        + (pi_ac + pi_cg) * s_15
-        + (pi_ac + pi_ct) * s_16
-        + (pi_ag + pi_at) * s_17
-        + (pi_ag + pi_cg) * s_18
-        + (pi_ag + pi_gt) * s_19
-        + (pi_at + pi_ct) * s_20
-        + (pi_at + pi_gt) * s_21
-        + (pi_cg + pi_ct) * s_22
-        + (pi_cg + pi_gt) * s_23
-        + (pi_ct + pi_gt) * s_24
-    )
 
 
 def Qsym_gtr10z(pi10s, s_is):
@@ -1417,14 +1398,18 @@ def make_gtr10z_prob_model(pis, model_params, *, vec=False):
 def cellphy10_rate(pi10s, s_is):
     pi_aa, pi_cc, pi_gg, pi_tt, pi_ac, pi_ag, pi_at, pi_cg, pi_ct, pi_gt = pi10s
     s_1, s_2, s_3, s_4, s_5, s_6 = s_is
-    return (
-        (pi_aa + 2 * pi_ac + pi_ag + pi_at + pi_cc + pi_cg + pi_ct) * s_1
-        + (pi_aa + pi_ac + 2 * pi_ag + pi_at + pi_cg + pi_gg + pi_gt) * s_2
-        + (pi_aa + pi_ac + pi_ag + 2 * pi_at + pi_ct + pi_gt + pi_tt) * s_3
-        + (pi_ac + pi_ag + pi_cc + 2 * pi_cg + pi_ct + pi_gg + pi_gt) * s_4
-        + (pi_ac + pi_at + pi_cc + pi_cg + 2 * pi_ct + pi_gt + pi_tt) * s_5
-        + (pi_ag + pi_at + pi_cg + pi_ct + pi_gg + 2 * pi_gt + pi_tt) * s_6
+    # fmt: off
+    # @formatter:off
+    return 2 * (
+          (pi_aa * pi_ac + pi_ac * pi_cc + pi_ag * pi_cg + pi_at * pi_ct) * s_1
+        + (pi_aa * pi_ag + pi_ac * pi_cg + pi_ag * pi_gg + pi_at * pi_gt) * s_2
+        + (pi_aa * pi_at + pi_ac * pi_ct + pi_ag * pi_gt + pi_at * pi_tt) * s_3
+        + (pi_ac * pi_ag + pi_cc * pi_cg + pi_cg * pi_gg + pi_ct * pi_gt) * s_4
+        + (pi_ac * pi_at + pi_cc * pi_ct + pi_cg * pi_gt + pi_ct * pi_tt) * s_5
+        + (pi_ag * pi_at + pi_cg * pi_ct + pi_gg * pi_gt + pi_gt * pi_tt) * s_6
     )
+    # @formatter:on
+    # fmt: on
 
 
 def Qsym_cellphy10(pi10s, s_is):
@@ -1677,15 +1662,19 @@ def make_unphased_GTRsq_prob_model(pis10, rate_params, *, vec=False):
 
 
 def unphased_rate(pis10, s_is):
-    pis16 = pis10 @ U @ perm.T
-    pi_a, pi_c, pi_g, pi_t = np.sum(pis16.reshape(4, 4), axis=0)
+    pi_aa, pi_cc, pi_gg, pi_tt, pi_ac, pi_ag, pi_at, pi_cg, pi_ct, pi_gt = pis10
     s_ac, s_ag, s_at, s_cg, s_ct, s_gt = s_is
 
-    return 5 * (
-        (pi_a + pi_c) * s_ac
-        + (pi_a + pi_g) * s_ag
-        + (pi_a + pi_t) * s_at
-        + (pi_c + pi_g) * s_cg
-        + (pi_c + pi_t) * s_ct
-        + (pi_g + pi_t) * s_gt
+    pi_a = pi_aa + pi_ac / 2 + pi_ag / 2 + pi_at / 2
+    pi_c = pi_ac / 2 + pi_cc + pi_cg / 2 + pi_ct / 2
+    pi_g = pi_ag / 2 + pi_cg / 2 + pi_gg + pi_gt / 2
+    pi_t = pi_at / 2 + pi_ct / 2 + pi_gt / 2 + pi_tt
+
+    return 4 * (
+        pi_a * pi_c * s_ac
+        + pi_a * pi_g * s_ag
+        + pi_a * pi_t * s_at
+        + pi_c * pi_g * s_cg
+        + pi_c * pi_t * s_ct
+        + pi_g * pi_t * s_gt
     )
