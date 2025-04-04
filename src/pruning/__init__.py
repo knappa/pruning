@@ -1,6 +1,3 @@
-from pruning.util import rate_param_cleanup
-
-
 def main_cli():
     import argparse
     import functools
@@ -32,6 +29,9 @@ def main_cli():
         perm,
         phased_mp_rate,
         phased_rate,
+        pi4s_to_unphased_pi10s,
+        pi10s_to_pi4s,
+        unphased_freq_param_cleanup,
         unphased_rate,
     )
     from pruning.objective_functions import (
@@ -49,6 +49,7 @@ def main_cli():
         log_dot,
         log_matrix_mult,
         print_stats,
+        rate_param_cleanup,
     )
 
     model_list = [
@@ -253,6 +254,8 @@ def main_cli():
                 freq_params = seq_pis
             case "UNPHASED_DNA" | "CELLPHY" | "GTR10Z" | "GTR10":
                 freq_params = seq_pis10
+                if model == "UNPHASED_DNA":
+                    freq_params = unphased_freq_param_cleanup(freq_params)
             case "PHASED_DNA16" | "PHASED_DNA16_MP":
                 freq_params = seq_pis16
             case _:
@@ -327,7 +330,7 @@ def main_cli():
             num_rate_params = 6
             rate_constraint = unphased_rate
             if freq_params is None:
-                freq_params = seq_pis10
+                freq_params = unphased_freq_param_cleanup(seq_pis10)
 
         case "CELLPHY":
             num_rate_params = 6
@@ -503,12 +506,199 @@ def main_cli():
         branch_lengths = np.maximum(0.0, res.x)
 
         if freq_params_option == "OPTIMIZE":
+            if model == "UNPHASED_DNA":
+
+                def unphased_full_param_objective(params, branch_lengths):
+                    """
+                    Run the full parameter objective function, but first convert the 4-state frequency parameters to
+                    10 state parameters.
+
+                    :param params: 4-state frequency parameters + rate params
+                    :param branch_lengths:
+                    :return:
+                    """
+                    log_freq_params_4, rate_params = params[:4], params[4:]
+                    with np.errstate(divide="ignore"):
+                        log_freq_params_10 = np.clip(
+                            np.log(
+                                np.clip(pi4s_to_unphased_pi10s(np.exp(log_freq_params_4)), 0.0, 1.0)
+                            ),
+                            -1e100,
+                            0.0,
+                        )
+                        log_freq_params_4 -= logsumexp(log_freq_params_4)
+                    return full_param_objective(
+                        np.concatenate((log_freq_params_10, rate_params)), branch_lengths
+                    )
+
+                with np.errstate(divide="ignore"):
+                    log_freq_params_4 = np.clip(
+                        np.log(np.clip(pi10s_to_pi4s(np.exp(log_freq_params)), 0.0, 1.0)),
+                        -1e100,
+                        0.0,
+                    )
+                    log_freq_params_4 -= logsumexp(log_freq_params_4)
+                res = minimize(
+                    unphased_full_param_objective,
+                    np.concatenate((log_freq_params_4, rate_params)),
+                    args=(branch_lengths,),
+                    method=opt.method,
+                    bounds=([(-np.inf, 0.0)] * 4) + ([(1e-10, np.inf)] * num_rate_params),
+                    callback=(
+                        (
+                            CallbackIR()
+                            if opt.method not in {"TNC", "SLSQP", "COBYLA"}
+                            else CallbackParam()
+                        )
+                        if opt.log
+                        else None
+                    ),
+                    options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+                )
+                if opt.log:
+                    print(res)
+
+                log_freq_params_4 = np.minimum(0.0, res.x[:4])
+                log_freq_params_4 -= logsumexp(log_freq_params_4)  # fine tune prob dist
+                # convert back to 10 state frequencies
+                freq_params = pi4s_to_unphased_pi10s(np.exp(log_freq_params_4))
+                freq_params /= np.sum(freq_params)
+                with np.errstate(divide="ignore"):
+                    log_freq_params = np.clip(
+                        np.log(freq_params),
+                        -1e100,
+                        0.0,
+                    )
+
+                # fine tune mu
+                rate_params = rate_param_cleanup(
+                    res.x[4:], log_freq_params, ploidy, rate_constraint
+                )
+
+            else:
+                res = minimize(
+                    full_param_objective,
+                    np.concatenate((log_freq_params, rate_params)),
+                    args=(branch_lengths,),
+                    method=opt.method,
+                    bounds=([(-np.inf, 0.0)] * num_freq_params)
+                    + ([(1e-10, np.inf)] * num_rate_params),
+                    callback=(
+                        (
+                            CallbackIR()
+                            if opt.method not in {"TNC", "SLSQP", "COBYLA"}
+                            else CallbackParam()
+                        )
+                        if opt.log
+                        else None
+                    ),
+                    options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+                )
+                if opt.log:
+                    print(res)
+
+                log_freq_params = np.minimum(0.0, res.x[:num_freq_params])
+                log_freq_params -= logsumexp(log_freq_params)  # fine tune prob dist
+                freq_params = np.exp(log_freq_params)
+
+                # fine tune mu
+                rate_params = rate_param_cleanup(
+                    res.x[num_freq_params:], log_freq_params, ploidy, rate_constraint
+                )
+
+    ####################################################################################################
+
+    if freq_params_option == "OPTIMIZE":
+
+        from pruning.objective_functions import full_objective_prototype
+
+        full_objective = functools.partial(
+            full_objective_prototype,
+            num_pis=num_freq_params,
+            num_params=num_rate_params,
+            neg_log_likelihood=neg_log_likelihood,
+            rate_constraint=rate_constraint,
+            ploidy=ploidy,
+        )
+
+        if model == "UNPHASED_DNA":
+
+            def unphased_full_objective(params):
+                """
+                Run the full objective function, but first convert the 4-state frequency parameters to 10 state
+                parameters.
+
+                :param params: 4-state frequency parameters + rate params + branch lengths
+                :return:
+                """
+                log_freq_params_4, other_params = params[:4], params[4:]
+                with np.errstate(divide="ignore"):
+                    log_freq_params_10 = np.clip(
+                        np.log(
+                            np.clip(pi4s_to_unphased_pi10s(np.exp(log_freq_params_4)), 0.0, 1.0)
+                        ),
+                        -1e100,
+                        0.0,
+                    )
+                    log_freq_params_4 -= logsumexp(log_freq_params_4)
+                return full_objective(np.concatenate((log_freq_params_10, other_params)))
+
+            with np.errstate(divide="ignore"):
+                log_freq_params_4 = np.clip(
+                    np.log(np.clip(pi10s_to_pi4s(np.exp(log_freq_params)), 0.0, 1.0)),
+                    -1e100,
+                    0.0,
+                )
+                log_freq_params_4 -= logsumexp(log_freq_params_4)
             res = minimize(
-                full_param_objective,
-                np.concatenate((log_freq_params, rate_params)),
-                args=(branch_lengths,),
+                unphased_full_objective,
+                np.concatenate((log_freq_params_4, rate_params, branch_lengths)),
                 method=opt.method,
-                bounds=([(-np.inf, 0.0)] * num_freq_params) + ([(1e-10, np.inf)] * num_rate_params),
+                bounds=([(-np.inf, 0.0)] * 4)
+                + [(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
+                callback=(
+                    (
+                        CallbackIR()
+                        if opt.method not in {"TNC", "SLSQP", "COBYLA"}
+                        else CallbackParam()
+                    )
+                    if opt.log
+                    else None
+                ),
+                options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+            )
+            if opt.log:
+                print(res)
+
+            log_freq_params_4 = np.minimum(0.0, res.x[:4])
+            log_freq_params_4 -= logsumexp(log_freq_params_4)  # fine tune prob dist
+            # convert back to 10 state frequencies
+            freq_params = pi4s_to_unphased_pi10s(np.exp(log_freq_params_4))
+            freq_params /= np.sum(freq_params)
+            with np.errstate(divide="ignore"):
+                log_freq_params = np.clip(
+                    np.log(freq_params),
+                    -1e100,
+                    0.0,
+                )
+
+            # fine tune mu
+            rate_params = rate_param_cleanup(
+                res.x[4 : 4 + num_rate_params],
+                log_freq_params,
+                ploidy,
+                rate_constraint,
+            )
+
+            branch_lengths = np.maximum(0.0, res.x[4 + num_rate_params :])
+        else:
+
+            res = minimize(
+                full_objective,
+                np.concatenate((log_freq_params, rate_params, branch_lengths)),
+                method=opt.method,
+                bounds=([(-np.inf, 0.0)] * num_freq_params)
+                + [(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
                 callback=(
                     (
                         CallbackIR()
@@ -529,53 +719,13 @@ def main_cli():
 
             # fine tune mu
             rate_params = rate_param_cleanup(
-                res.x[num_freq_params:], log_freq_params, ploidy, rate_constraint
+                res.x[num_freq_params : num_freq_params + num_rate_params],
+                log_freq_params,
+                ploidy,
+                rate_constraint,
             )
 
-    ####################################################################################################
-
-    if freq_params_option == "OPTIMIZE":
-
-        from pruning.objective_functions import full_objective_prototype
-
-        full_objective = functools.partial(
-            full_objective_prototype,
-            num_pis=num_freq_params,
-            num_params=num_rate_params,
-            neg_log_likelihood=neg_log_likelihood,
-            rate_constraint=rate_constraint,
-            ploidy=ploidy,
-        )
-
-        res = minimize(
-            full_objective,
-            np.concatenate((log_freq_params, rate_params, branch_lengths)),
-            method=opt.method,
-            bounds=([(-np.inf, 0.0)] * num_freq_params)
-            + [(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
-            callback=(
-                (CallbackIR() if opt.method not in {"TNC", "SLSQP", "COBYLA"} else CallbackParam())
-                if opt.log
-                else None
-            ),
-            options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
-        )
-        if opt.log:
-            print(res)
-
-        log_freq_params = np.minimum(0.0, res.x[:num_freq_params])
-        log_freq_params -= logsumexp(log_freq_params)  # fine tune prob dist
-        freq_params = np.exp(log_freq_params)
-
-        # fine tune mu
-        rate_params = rate_param_cleanup(
-            res.x[num_freq_params : num_freq_params + num_rate_params],
-            log_freq_params,
-            ploidy,
-            rate_constraint,
-        )
-
-        branch_lengths = np.maximum(0.0, res.x[num_freq_params + num_rate_params :])
+            branch_lengths = np.maximum(0.0, res.x[num_freq_params + num_rate_params :])
 
     else:
         # optimize everything but the state frequencies

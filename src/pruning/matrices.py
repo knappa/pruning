@@ -1623,8 +1623,7 @@ def make_GTR_prob_model(pis, gtr_params, *, vec=False):
 
 
 def make_unphased_GTRsq_prob_model(pis10, rate_params, *, vec=False):
-    pis16 = pis10 @ U @ perm.T
-    pi_a, pi_c, pi_g, pi_t = np.sum(pis16.reshape(4, 4), axis=0)
+    pi_a, pi_c, pi_g, pi_t = pi10s_to_pi4s(pis10)
     # print(f"{pi_a=} {pi_c=} {pi_g=} {pi_t=}")
     s_ac, s_ag, s_at, s_cg, s_ct, s_gt = np.abs(rate_params)
     # print(f"{s_ac=} {s_ag=} {s_at=} {s_cg=} {s_ct=} {s_gt=}")
@@ -1662,13 +1661,8 @@ def make_unphased_GTRsq_prob_model(pis10, rate_params, *, vec=False):
 
 
 def unphased_rate(pis10, s_is):
-    pi_aa, pi_cc, pi_gg, pi_tt, pi_ac, pi_ag, pi_at, pi_cg, pi_ct, pi_gt = pis10
+    pi_a, pi_c, pi_g, pi_t = pi10s_to_pi4s(pis10)
     s_ac, s_ag, s_at, s_cg, s_ct, s_gt = s_is
-
-    pi_a = pi_aa + pi_ac / 2 + pi_ag / 2 + pi_at / 2
-    pi_c = pi_ac / 2 + pi_cc + pi_cg / 2 + pi_ct / 2
-    pi_g = pi_ag / 2 + pi_cg / 2 + pi_gg + pi_gt / 2
-    pi_t = pi_at / 2 + pi_ct / 2 + pi_gt / 2 + pi_tt
 
     return 4 * (
         pi_a * pi_c * s_ac
@@ -1678,3 +1672,42 @@ def unphased_rate(pis10, s_is):
         + pi_c * pi_t * s_ct
         + pi_g * pi_t * s_gt
     )
+
+
+####################################################################################################
+# 10/4 state conversions
+
+
+def pi10s_to_pi4s(pi10s):
+    """
+    Convert 10 state frequencies to 4 state frequencies
+
+    :param pi10s: 10 state frequencies
+    :return:
+    """
+    pi_aa, pi_cc, pi_gg, pi_tt, pi_ac, pi_ag, pi_at, pi_cg, pi_ct, pi_gt = pi10s
+
+    pi_a = pi_aa + pi_ac / 2 + pi_ag / 2 + pi_at / 2
+    pi_c = pi_ac / 2 + pi_cc + pi_cg / 2 + pi_ct / 2
+    pi_g = pi_ag / 2 + pi_cg / 2 + pi_gg + pi_gt / 2
+    pi_t = pi_at / 2 + pi_ct / 2 + pi_gt / 2 + pi_tt
+    return np.array([pi_a, pi_c, pi_g, pi_t])
+
+
+def pi4s_to_unphased_pi10s(pi4s):
+    """
+    Generate unphased 10 state frequencies from 4 state frequencies
+    :param pi4s:
+    :return:
+    """
+    return np.kron(pi4s, pi4s) @ perm @ V
+
+
+def unphased_freq_param_cleanup(freq_params):
+    """
+    Project a set of 10 state frequency parameters to one that obeys the hypotheses of the lumped unphased model.
+
+    :param freq_params:
+    :return:
+    """
+    return pi4s_to_unphased_pi10s(pi10s_to_pi4s(freq_params))
