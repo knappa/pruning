@@ -81,6 +81,9 @@ def param_objective_prototype(
     from scipy.special import logsumexp
 
     log_freq_params = params[:num_freq_params]
+    freq_error = logsumexp(log_freq_params)
+    log_freq_params -= freq_error
+
     rate_params = params[num_freq_params:]
 
     if gt_norm:
@@ -94,7 +97,7 @@ def param_objective_prototype(
         loss += (rate_constraint_val - ploidy) ** 2
     # should be a probability dist
     # noinspection PyTypeChecker
-    loss += logsumexp(log_freq_params, return_sign=False) ** 2
+    loss += freq_error ** 2
     return loss
 
 
@@ -124,6 +127,9 @@ def full_objective_prototype(
     from scipy.special import logsumexp
 
     log_freq_params = params[:num_freq_params]
+    freq_error = logsumexp(log_freq_params)
+    log_freq_params -= freq_error
+
     rate_params = params[num_freq_params : num_freq_params + num_rate_params]
     branch_lengths = params[num_freq_params + num_rate_params :]
 
@@ -139,7 +145,7 @@ def full_objective_prototype(
 
     # should be a probability dist
     # noinspection PyTypeChecker
-    loss += logsumexp(log_freq_params) ** 2
+    loss += freq_error ** 2
 
     # zero length at root
     loss += branch_lengths[0] ** 2
@@ -152,7 +158,7 @@ def rates_distances_objective_prototype(
     log_freq_params,
     *,
     gt_norm=False,
-    num_params,
+    num_rate_params,
     neg_log_likelihood,
     rate_constraint,
     ploidy: Union[int, float],
@@ -163,7 +169,7 @@ def rates_distances_objective_prototype(
     :param params: first entries are the model params, rest are branch lengths
     :param log_freq_params: state frequencies
     :param gt_norm: if True, normalize the GT rate to 1
-    :param num_params:
+    :param num_rate_params:
     :param neg_log_likelihood:
     :param rate_constraint:
     :param ploidy:
@@ -171,8 +177,8 @@ def rates_distances_objective_prototype(
     """
     import numpy as np
 
-    rate_params = params[:num_params]
-    branch_lengths = params[num_params:]
+    rate_params = params[:num_rate_params]
+    branch_lengths = params[num_rate_params:]
 
     if gt_norm:
         loss = neg_log_likelihood(log_freq_params, rate_params / rate_params[-1], branch_lengths)

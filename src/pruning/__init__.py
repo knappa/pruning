@@ -459,7 +459,7 @@ def main_cli():
         param_objective_prototype,
         neg_log_likelihood=neg_log_likelihood,
         rate_constraint=rate_constraint,
-        num_pis=num_freq_params,
+        num_freq_params=num_freq_params,
         ploidy=ploidy,
     )
 
@@ -614,8 +614,8 @@ def main_cli():
 
         full_objective = functools.partial(
             full_objective_prototype,
-            num_pis=num_freq_params,
-            num_params=num_rate_params,
+            num_freq_params=num_freq_params,
+            num_rate_params=num_rate_params,
             neg_log_likelihood=neg_log_likelihood,
             rate_constraint=rate_constraint,
             ploidy=ploidy,
@@ -731,7 +731,7 @@ def main_cli():
         # optimize everything but the state frequencies
         params_distances_objective = functools.partial(
             rates_distances_objective_prototype,
-            num_params=num_rate_params,
+            num_rate_params=num_rate_params,
             neg_log_likelihood=neg_log_likelihood,
             rate_constraint=rate_constraint,
             ploidy=ploidy,
