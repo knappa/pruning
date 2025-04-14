@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import numpy as np
 from scipy.special import logsumexp
 
@@ -271,3 +273,12 @@ def print_stats(*, rate_params, freq_params, neg_l, tree_distances, true_branch_
 def rate_param_cleanup(*, x, log_freq_params, ploidy, rate_constraint):
     rate_params = np.maximum(0.0, x)
     return rate_params * ploidy / rate_constraint(np.exp(log_freq_params), rate_params)
+
+
+################################################################################
+# solver options
+
+solver_options = defaultdict(dict)
+solver_options["L-BFGS-B"] = {"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10}
+solver_options["Powell"] = {"maxiter": 1000, "ftol": 1e-10}
+solver_options["Nelder-Mead"] = {"adaptive": True, "fatol": 0.1}

@@ -20,6 +20,7 @@ classifiers = [
 
 [project.scripts]
 pruning = "pruning:main_cli"
+pruning_stack = "pruning.stack:main_cli"
 
 
 [project.urls]
