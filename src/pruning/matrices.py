@@ -1,5 +1,7 @@
 import numba
 import numpy as np
+import scipy
+from numpy.linalg import LinAlgError
 
 perm = np.array(
     # fmt: off
@@ -579,15 +581,27 @@ def Qsym_GTRxGTR(pis, s_is):
 
 def make_GTRxGTR_prob_model(pis, model_params, *, vec=False):
     sym_Q = Qsym_GTRxGTR(pis, model_params)
-    evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    left = sym_evecs / np.sqrt(pis)[:, None]
-    right = sym_evecs.T * np.sqrt(pis)
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    if vec:
-        return lambda t: prob_model_helper_vec(t, left, right, evals)
-    else:
-        return lambda t: prob_model_helper(t, left, right, evals)
+        left = sym_evecs / np.sqrt(pis)[:, None]
+        right = sym_evecs.T * np.sqrt(pis)
+
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
 
 
 ####################################################################################################
@@ -910,15 +924,26 @@ def Qsym_GTRsq(pis, s_is):
 
 def make_GTRsq_prob_model(pis, model_params, *, vec=False):
     sym_Q = Qsym_GTRsq(pis, model_params)
-    evals, sym_evecs = np.linalg.eigh(sym_Q)
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    left = sym_evecs / np.sqrt(pis)[:, None]
-    right = sym_evecs.T * np.sqrt(pis)
+        left = sym_evecs / np.sqrt(pis)[:, None]
+        right = sym_evecs.T * np.sqrt(pis)
 
-    if vec:
-        return lambda t: prob_model_helper_vec(t, left, right, evals)
-    else:
-        return lambda t: prob_model_helper(t, left, right, evals)
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
 
 
 ####################################################################################################
@@ -1173,16 +1198,28 @@ def Qsym_gtr10(pi10s, s_is):
 def make_gtr10_prob_model(pis, model_params, *, vec=False):
     # print(f"make_gtr10_prob_model({pis=},{model_params=},{vec=})")
     sym_Q = Qsym_gtr10(pis, model_params)
-    evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    # Q_gtr10 = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_gtr10 @ np.diag([np.sqrt(x) for x in pi10s])
-    left = sym_evecs / np.sqrt(pis)[:, None]
-    right = sym_evecs.T * np.sqrt(pis)
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    if vec:
-        return lambda t: prob_model_helper_vec(t, left, right, evals)
-    else:
-        return lambda t: prob_model_helper(t, left, right, evals)
+        # Q_gtr10 = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_gtr10 @ np.diag([np.sqrt(x) for x in pi10s])
+        left = sym_evecs / np.sqrt(pis)[:, None]
+        right = sym_evecs.T * np.sqrt(pis)
+
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
 
 
 ####################################################################################################
@@ -1380,16 +1417,28 @@ def Qsym_gtr10z(pi10s, s_is):
 def make_gtr10z_prob_model(pis, model_params, *, vec=False):
     # print(f"make_gtr10z_prob_model({pis=},{model_params=},{vec=})")
     sym_Q = Qsym_gtr10z(pis, model_params)
-    evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    # Q_gtr10z = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_gtr10z @ np.diag([np.sqrt(x) for x in pi10s])
-    left = sym_evecs / np.sqrt(pis)[:, None]
-    right = sym_evecs.T * np.sqrt(pis)
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    if vec:
-        return lambda t: prob_model_helper_vec(t, left, right, evals)
-    else:
-        return lambda t: prob_model_helper(t, left, right, evals)
+        # Q_gtr10z = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_gtr10z @ np.diag([np.sqrt(x) for x in pi10s])
+        left = sym_evecs / np.sqrt(pis)[:, None]
+        right = sym_evecs.T * np.sqrt(pis)
+
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
 
 
 ####################################################################################################
@@ -1546,16 +1595,28 @@ def Qsym_cellphy10(pi10s, s_is):
 def make_cellphy_prob_model(pis, model_params, *, vec=False):
     # print(f"make_cellphy_prob_model({pis=},{model_params=},{vec=})")
     sym_Q = Qsym_cellphy10(pis, model_params)
-    evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    # Q_cellphy10 = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_cellphy10 @ np.diag([np.sqrt(x) for x in pi10s])
-    left = sym_evecs / np.sqrt(pis)[:, None]
-    right = sym_evecs.T * np.sqrt(pis)
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    if vec:
-        return lambda t: prob_model_helper_vec(t, left, right, evals)
-    else:
-        return lambda t: prob_model_helper(t, left, right, evals)
+        # Q_cellphy10 = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_cellphy10 @ np.diag([np.sqrt(x) for x in pi10s])
+        left = sym_evecs / np.sqrt(pis)[:, None]
+        right = sym_evecs.T * np.sqrt(pis)
+
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
 
 
 ####################################################################################################
@@ -1611,15 +1672,27 @@ def Qsym_gtr4(pis, model_params):
 def make_GTR_prob_model(pis, gtr_params, *, vec=False):
 
     sym_Q = Qsym_gtr4(pis, gtr_params)
-    evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    left = sym_evecs * np.sqrt(pis)[:, None]
-    right = sym_evecs.T / np.sqrt(pis)
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    if vec:
-        return lambda t: prob_model_helper_vec(t, left, right, evals)
-    else:
-        return lambda t: prob_model_helper(t, left, right, evals)
+        left = sym_evecs * np.sqrt(pis)[:, None]
+        right = sym_evecs.T / np.sqrt(pis)
+
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
 
 
 def make_unphased_GTRsq_prob_model(pis10, rate_params, *, vec=False):

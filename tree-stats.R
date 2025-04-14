@@ -10,7 +10,7 @@ library(TreeDist)
 library(stringr)
 library(phangorn)
 
-models <- c("phased", "unphased", "cellphy", "cellphy-pi", "gtr10z", "gtr10")
+models <- c("phased4", "phased16", "phased16mp", "unphased", "cellphy", "cellphy-pi", "gtr10z", "gtr10")
 
 df <- data.frame(matrix(
   ncol = 10,

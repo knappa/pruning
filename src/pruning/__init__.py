@@ -140,22 +140,6 @@ def main_cli():
     )
     ################################################################################
 
-    parser.add_argument(
-        "--method",
-        type=str,
-        default="L-BFGS-B",
-        help="scipy solver",
-        choices=[
-            "Nelder-Mead",
-            "L-BFGS-B",
-            "TNC",
-            "SLSQP",
-            "Powell",
-            "trust-constr",
-            "COBYLA",
-            "COBYQA",
-        ],
-    )
     parser.add_argument("--ambig", type=str, default="?", help="ambiguity character")
     parser.add_argument("--output", type=str, help="output filename prefix for tree")
     parser.add_argument("--overwrite", action="store_true", help="overwrite outputs, if they exist")
@@ -222,6 +206,14 @@ def main_cli():
         freq_params = np.array(opt.fix_freq_params16)
     else:
         freq_params_option = "FROM_SEQ"
+
+    ################################################################################
+    # solver options
+
+    solver_options = defaultdict(dict)
+    solver_options["L-BFGS-B"] = {"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10}
+    solver_options["Powell"] = {"maxiter": 1000, "ftol": 1e-10}
+    solver_options["Nelder-Mead"] = {"adaptive": True, "fatol": 0.1}
 
     ################################################################################
     # read the true tree
@@ -463,6 +455,8 @@ def main_cli():
         ploidy=ploidy,
     )
 
+    # alternate a few times between optimizing the rate parameters and the branch lengths.
+    # if requested, also optimize the frequency parameters
     for _ in range(2):
         res = minimize(
             param_objective,
@@ -471,14 +465,10 @@ def main_cli():
                 log_freq_params,
                 branch_lengths,
             ),
-            method=opt.method,
+            method="L-BFGS-B",
             bounds=[(1e-10, np.inf)] * num_rate_params,
-            callback=(
-                (CallbackIR() if opt.method not in {"TNC", "SLSQP", "COBYLA"} else CallbackParam())
-                if opt.log
-                else None
-            ),
-            options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+            callback=CallbackParam() if opt.log else None,
+            options=solver_options["L-BFGS-B"],
         )
         if opt.log:
             print(res)
@@ -490,14 +480,10 @@ def main_cli():
             branch_length_objective,
             branch_lengths,
             args=(log_freq_params, rate_params),
-            method=opt.method,
+            method="L-BFGS-B",
             bounds=[(0.0, np.inf)] + [(1e-8, np.inf)] * (2 * len(taxa) - 2),
-            callback=(
-                (CallbackIR() if opt.method not in {"TNC", "SLSQP", "COBYLA"} else CallbackParam())
-                if opt.log
-                else None
-            ),
-            options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+            callback=CallbackParam() if opt.log else None,
+            options=solver_options["L-BFGS-B"],
         )
         if opt.log:
             print(res)
@@ -542,18 +528,10 @@ def main_cli():
                     unphased_full_param_objective,
                     np.concatenate((log_freq_params_4, rate_params)),
                     args=(branch_lengths,),
-                    method=opt.method,
+                    method="L-BFGS-B",
                     bounds=([(-np.inf, 0.0)] * 4) + ([(1e-10, np.inf)] * num_rate_params),
-                    callback=(
-                        (
-                            CallbackIR()
-                            if opt.method not in {"TNC", "SLSQP", "COBYLA"}
-                            else CallbackParam()
-                        )
-                        if opt.log
-                        else None
-                    ),
-                    options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+                    callback=CallbackParam() if opt.log else None,
+                    options=solver_options["L-BFGS-B"],
                 )
                 if opt.log:
                     print(res)
@@ -580,19 +558,11 @@ def main_cli():
                     full_param_objective,
                     np.concatenate((log_freq_params, rate_params)),
                     args=(branch_lengths,),
-                    method=opt.method,
+                    method="L-BFGS-B",
                     bounds=([(-np.inf, 0.0)] * num_freq_params)
                     + ([(1e-10, np.inf)] * num_rate_params),
-                    callback=(
-                        (
-                            CallbackIR()
-                            if opt.method not in {"TNC", "SLSQP", "COBYLA"}
-                            else CallbackParam()
-                        )
-                        if opt.log
-                        else None
-                    ),
-                    options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+                    callback=CallbackParam() if opt.log else None,
+                    options=solver_options["L-BFGS-B"],
                 )
                 if opt.log:
                     print(res)
@@ -607,6 +577,7 @@ def main_cli():
                 )
 
     ####################################################################################################
+    # Full joint (params + branch lengths) optimization
 
     if freq_params_option == "OPTIMIZE":
 
@@ -622,6 +593,8 @@ def main_cli():
         )
 
         if model == "UNPHASED_DNA":
+            # in the unphased dna model, the 10 state frequency parameters are dependant on the 4-state parameters
+            # so we have to handle this one separately
 
             def unphased_full_objective(params):
                 """
@@ -653,19 +626,11 @@ def main_cli():
             res = minimize(
                 unphased_full_objective,
                 np.concatenate((log_freq_params_4, rate_params, branch_lengths)),
-                method=opt.method,
+                method="L-BFGS-B",
                 bounds=([(-np.inf, 0.0)] * 4)
                 + [(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
-                callback=(
-                    (
-                        CallbackIR()
-                        if opt.method not in {"TNC", "SLSQP", "COBYLA"}
-                        else CallbackParam()
-                    )
-                    if opt.log
-                    else None
-                ),
-                options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+                callback=CallbackParam() if opt.log else None,
+                options=solver_options["L-BFGS-B"],
             )
             if opt.log:
                 print(res)
@@ -692,23 +657,16 @@ def main_cli():
 
             branch_lengths = np.maximum(0.0, res.x[4 + num_rate_params :])
         else:
+            # optimize the freq+rates+branch lengths
 
             res = minimize(
                 full_objective,
                 np.concatenate((log_freq_params, rate_params, branch_lengths)),
-                method=opt.method,
+                method="L-BFGS-B",
                 bounds=([(-np.inf, 0.0)] * num_freq_params)
                 + [(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
-                callback=(
-                    (
-                        CallbackIR()
-                        if opt.method not in {"TNC", "SLSQP", "COBYLA"}
-                        else CallbackParam()
-                    )
-                    if opt.log
-                    else None
-                ),
-                options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+                callback=CallbackParam() if opt.log else None,
+                options=solver_options["L-BFGS-B"],
             )
             if opt.log:
                 print(res)
@@ -741,14 +699,29 @@ def main_cli():
             params_distances_objective,
             np.concatenate((rate_params, branch_lengths)),
             args=(log_freq_params,),
-            method=opt.method,
+            method="L-BFGS-B",
             bounds=[(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
-            callback=(
-                (CallbackIR() if opt.method not in {"TNC", "SLSQP", "COBYLA"} else CallbackParam())
-                if opt.log
-                else None
-            ),
-            options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+            callback=CallbackParam() if opt.log else None,
+            options=solver_options["L-BFGS-B"],
+        )
+        if opt.log:
+            print(res)
+
+        # fine tune mu
+        rate_params = rate_param_cleanup(
+            res.x[:num_rate_params], log_freq_params, ploidy, rate_constraint
+        )
+
+        branch_lengths = np.maximum(0.0, res.x[num_rate_params:])
+
+        res = minimize(
+            params_distances_objective,
+            np.concatenate((rate_params, branch_lengths)),
+            args=(log_freq_params,),
+            method="Nelder-Mead",
+            bounds=[(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
+            callback=CallbackParam() if opt.log else None,
+            options=solver_options["Nelder-Mead"],
         )
         if opt.log:
             print(res)

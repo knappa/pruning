@@ -97,7 +97,7 @@ def param_objective_prototype(
         loss += (rate_constraint_val - ploidy) ** 2
     # should be a probability dist
     # noinspection PyTypeChecker
-    loss += freq_error ** 2
+    loss += freq_error**2
     return loss
 
 
@@ -145,7 +145,7 @@ def full_objective_prototype(
 
     # should be a probability dist
     # noinspection PyTypeChecker
-    loss += freq_error ** 2
+    loss += freq_error**2
 
     # zero length at root
     loss += branch_lengths[0] ** 2
@@ -185,8 +185,11 @@ def rates_distances_objective_prototype(
         loss += (rate_params[-1] - 1) ** 2  # fix the rate
     else:
         rate_constraint_val = rate_constraint(np.exp(log_freq_params), rate_params)
-        rate_params_corrected = rate_params * ploidy / rate_constraint_val
-        loss = neg_log_likelihood(log_freq_params, rate_params_corrected, branch_lengths)
+        if rate_constraint_val > 0:
+            rate_params_corrected = rate_params * ploidy / rate_constraint_val
+            loss = neg_log_likelihood(log_freq_params, rate_params_corrected, branch_lengths)
+        else:
+            loss = neg_log_likelihood(log_freq_params, rate_params, branch_lengths)
         loss += (rate_constraint_val - ploidy) ** 2  # fix the rate
 
     loss += branch_lengths[0] ** 2  # zero length at root
