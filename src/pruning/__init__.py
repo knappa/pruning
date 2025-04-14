@@ -718,10 +718,10 @@ def main_cli():
             params_distances_objective,
             np.concatenate((rate_params, branch_lengths)),
             args=(log_freq_params,),
-            method="Nelder-Mead",
+            method="Powell",
             bounds=[(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
             callback=CallbackParam() if opt.log else None,
-            options=solver_options["Nelder-Mead"],
+            options=solver_options["Powell"],
         )
         if opt.log:
             print(res)
