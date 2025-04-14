@@ -48,6 +48,54 @@ def dna_sequence_distance(
 
 
 @numba.njit
+def diploid_dna_disagreement(seq1: np.ndarray, seq2: np.ndarray) -> float:
+    disagreement = 0.0
+    assert seq1.shape == seq2.shape
+    for idx in range(len(seq1)):
+        seq1_a, seq1_b = np.divmod(seq1[idx], 5)
+        seq2_a, seq2_b = np.divmod(seq2[idx], 5)
+
+        if seq1_a < 4 and seq2_a < 4:
+            if seq1_a != seq2_a:
+                disagreement += 1.0
+        else:
+            disagreement += 0.75
+
+        if seq1_b < 4 and seq2_b < 4:
+            if seq1_b != seq2_b:
+                disagreement += 1.0
+        else:
+            disagreement += 0.75
+    return disagreement / (2 * len(seq1))
+
+
+def diploid_dna_sequence_distance(
+    seq1: np.ndarray, seq2: np.ndarray, *, pis: np.ndarray
+) -> Tuple[float, float]:
+    """
+    F81 distance, a generalization of the JC69 distance, which takes into account nucleotide frequencies
+    :param seq1: a diploid sequence
+    :param seq2: a diploid sequence
+    :param pis: ACGT frequencies
+    :return: F81 distance, variance of distance * sequence length
+    """
+    #
+    beta = 1 / (1 - np.sum(pis**2))
+    disagreement = diploid_dna_disagreement(seq1, seq2)
+    return (
+        -np.log(np.maximum(1e-10, 1 - beta * disagreement)) / beta,
+        np.clip(
+            np.nan_to_num((1 - disagreement) * disagreement / (beta * disagreement - 1) ** 2),
+            1,
+            1_000,
+        ),
+    )
+
+
+####################################################################################################
+
+
+@numba.njit
 def phased_dna_disagreement(seq1: np.ndarray, seq2: np.ndarray) -> float:
     disagreement = 0.0
     assert seq1.shape == seq2.shape
