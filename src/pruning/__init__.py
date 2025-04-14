@@ -13,12 +13,10 @@ def main_cli():
     from scipy.special import logsumexp
 
     from pruning.matrices import (
-        U,
         cellphy10_rate,
         gtr4_rate,
         gtr10_rate,
         gtr10z_rate,
-        make_A_GTR,
         make_cellphy_prob_model,
         make_gtr10_prob_model,
         make_gtr10z_prob_model,
@@ -26,7 +24,6 @@ def main_cli():
         make_GTRsq_prob_model,
         make_GTRxGTR_prob_model,
         make_unphased_GTRsq_prob_model,
-        perm,
         phased_mp_rate,
         phased_rate,
         pi4s_to_unphased_pi10s,
@@ -350,7 +347,10 @@ def main_cli():
         log_freq_params = np.clip(np.log(freq_params), -1e100, 0.0)
 
     rate_params = rate_param_cleanup(
-        np.ones(num_rate_params), log_freq_params, ploidy, rate_constraint
+        x=np.ones(num_rate_params),
+        log_freq_params=log_freq_params,
+        ploidy=ploidy,
+        rate_constraint=rate_constraint,
     )
 
     ##########################################################################################
@@ -474,7 +474,9 @@ def main_cli():
             print(res)
 
         # fine tune mu
-        rate_params = rate_param_cleanup(res.x, log_freq_params, ploidy, rate_constraint)
+        rate_params = rate_param_cleanup(
+            x=res.x, log_freq_params=log_freq_params, ploidy=ploidy, rate_constraint=rate_constraint
+        )
 
         res = minimize(
             branch_length_objective,
@@ -550,7 +552,10 @@ def main_cli():
 
                 # fine tune mu
                 rate_params = rate_param_cleanup(
-                    res.x[4:], log_freq_params, ploidy, rate_constraint
+                    x=res.x[4:],
+                    log_freq_params=log_freq_params,
+                    ploidy=ploidy,
+                    rate_constraint=rate_constraint,
                 )
 
             else:
@@ -573,7 +578,10 @@ def main_cli():
 
                 # fine tune mu
                 rate_params = rate_param_cleanup(
-                    res.x[num_freq_params:], log_freq_params, ploidy, rate_constraint
+                    x=res.x[num_freq_params:],
+                    log_freq_params=log_freq_params,
+                    ploidy=ploidy,
+                    rate_constraint=rate_constraint,
                 )
 
     ####################################################################################################
@@ -649,10 +657,10 @@ def main_cli():
 
             # fine tune mu
             rate_params = rate_param_cleanup(
-                res.x[4 : 4 + num_rate_params],
-                log_freq_params,
-                ploidy,
-                rate_constraint,
+                x=res.x[4 : 4 + num_rate_params],
+                log_freq_params=log_freq_params,
+                ploidy=ploidy,
+                rate_constraint=rate_constraint,
             )
 
             branch_lengths = np.maximum(0.0, res.x[4 + num_rate_params :])
@@ -677,10 +685,10 @@ def main_cli():
 
             # fine tune mu
             rate_params = rate_param_cleanup(
-                res.x[num_freq_params : num_freq_params + num_rate_params],
-                log_freq_params,
-                ploidy,
-                rate_constraint,
+                x=res.x[num_freq_params : num_freq_params + num_rate_params],
+                log_freq_params=log_freq_params,
+                ploidy=ploidy,
+                rate_constraint=rate_constraint,
             )
 
             branch_lengths = np.maximum(0.0, res.x[num_freq_params + num_rate_params :])
@@ -709,7 +717,10 @@ def main_cli():
 
         # fine tune mu
         rate_params = rate_param_cleanup(
-            res.x[:num_rate_params], log_freq_params, ploidy, rate_constraint
+            x=res.x[:num_rate_params],
+            log_freq_params=log_freq_params,
+            ploidy=ploidy,
+            rate_constraint=rate_constraint,
         )
 
         branch_lengths = np.maximum(0.0, res.x[num_rate_params:])
@@ -728,7 +739,10 @@ def main_cli():
 
         # fine tune mu
         rate_params = rate_param_cleanup(
-            res.x[:num_rate_params], log_freq_params, ploidy, rate_constraint
+            x=res.x[:num_rate_params],
+            log_freq_params=log_freq_params,
+            ploidy=ploidy,
+            rate_constraint=rate_constraint,
         )
 
         branch_lengths = np.maximum(0.0, res.x[num_rate_params:])
