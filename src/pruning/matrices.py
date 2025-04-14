@@ -1,5 +1,7 @@
 import numba
 import numpy as np
+import scipy
+from numpy.linalg import LinAlgError
 
 perm = np.array(
     # fmt: off
@@ -160,15 +162,788 @@ def make_A_GTR(pis):
 
 def gtr4_rate(pis, s_is):
     pi_a, pi_c, pi_g, pi_t = pis
-    s_1, s_2, s_3, s_4, s_5, s_6 = s_is
+    s_ac, s_ag, s_at, s_cg, s_ct, s_gt = s_is
     # fmt: off
     # @formatter:off
     return 2 * (
-          pi_a * pi_c * s_1 + pi_a * pi_g * s_2 + pi_a * pi_t * s_3
-        + pi_c * pi_g * s_4 + pi_c * pi_t * s_5 + pi_g * pi_t * s_6
+          pi_a * pi_c * s_ac + pi_a * pi_g * s_ag + pi_a * pi_t * s_at
+        + pi_c * pi_g * s_cg + pi_c * pi_t * s_ct + pi_g * pi_t * s_gt
     )
     # @formatter:on
     # fmt: on
+
+
+####################################################################################################
+
+
+def phased_mp_rate(pis, s_is):
+    pi_a_m, pi_c_m, pi_g_m, pi_t_m = np.sum(pis.reshape(4, 4), axis=1)
+    pi_a_p, pi_c_p, pi_g_p, pi_t_p = np.sum(pis.reshape(4, 4), axis=0)
+    # fmt: off
+    # @formatter:off
+    ( s_ac_m, s_ag_m, s_at_m, s_cg_m, s_ct_m, s_gt_m,
+      s_ac_p, s_ag_p, s_at_p, s_cg_p, s_ct_p, s_gt_p) = s_is
+
+    return 2 * (
+          pi_a_m * pi_c_m * s_ac_m + pi_a_m * pi_g_m * s_ag_m + pi_a_m * pi_t_m * s_at_m
+        + pi_c_m * pi_g_m * s_cg_m + pi_c_m * pi_t_m * s_ct_m + pi_g_m * pi_t_m * s_gt_m
+        + pi_a_p * pi_c_p * s_ac_p + pi_a_p * pi_g_p * s_ag_p + pi_a_p * pi_t_p * s_at_p
+        + pi_c_p * pi_g_p * s_cg_p + pi_c_p * pi_t_p * s_ct_p + pi_g_p * pi_t_p * s_gt_p
+    )
+    # @formatter:on
+    # fmt: on
+
+
+def Qsym_GTRxGTR(pis, s_is):
+    pi_a_m, pi_c_m, pi_g_m, pi_t_m = np.sum(pis.reshape(4, 4), axis=1)
+    pi_a_p, pi_c_p, pi_g_p, pi_t_p = np.sum(pis.reshape(4, 4), axis=0)
+    # fmt: off
+    # @formatter:off
+    ( s_ac_m, s_ag_m, s_at_m, s_cg_m, s_ct_m, s_gt_m,
+      s_ac_p, s_ag_p, s_at_p, s_cg_p, s_ct_p, s_gt_p) = s_is
+    # @formatter:on
+    # fmt: on
+
+    return np.array(
+        [
+            [
+                -pi_c_m * s_ac_m
+                - pi_c_p * s_ac_p
+                - pi_g_m * s_ag_m
+                - pi_g_p * s_ag_p
+                - pi_t_m * s_at_m
+                - pi_t_p * s_at_p,
+                np.sqrt(pi_a_p * pi_c_p) * s_ac_p,
+                np.sqrt(pi_a_p * pi_g_p) * s_ag_p,
+                np.sqrt(pi_a_p * pi_t_p) * s_at_p,
+                np.sqrt(pi_a_m * pi_c_m) * s_ac_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_g_m) * s_ag_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_t_m) * s_at_m,
+                0,
+                0,
+                0,
+            ],
+            [
+                np.sqrt(pi_a_p * pi_c_p) * s_ac_p,
+                -pi_c_m * s_ac_m
+                - pi_a_p * s_ac_p
+                - pi_g_m * s_ag_m
+                - pi_t_m * s_at_m
+                - pi_g_p * s_cg_p
+                - pi_t_p * s_ct_p,
+                np.sqrt(pi_c_p * pi_g_p) * s_cg_p,
+                np.sqrt(pi_c_p * pi_t_p) * s_ct_p,
+                0,
+                np.sqrt(pi_a_m * pi_c_m) * s_ac_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_g_m) * s_ag_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_t_m) * s_at_m,
+                0,
+                0,
+            ],
+            [
+                np.sqrt(pi_a_p * pi_g_p) * s_ag_p,
+                np.sqrt(pi_c_p * pi_g_p) * s_cg_p,
+                -pi_c_m * s_ac_m
+                - pi_g_m * s_ag_m
+                - pi_a_p * s_ag_p
+                - pi_t_m * s_at_m
+                - pi_c_p * s_cg_p
+                - pi_t_p * s_gt_p,
+                np.sqrt(pi_g_p * pi_t_p) * s_gt_p,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_c_m) * s_ac_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_g_m) * s_ag_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_t_m) * s_at_m,
+                0,
+            ],
+            [
+                np.sqrt(pi_a_p * pi_t_p) * s_at_p,
+                np.sqrt(pi_c_p * pi_t_p) * s_ct_p,
+                np.sqrt(pi_g_p * pi_t_p) * s_gt_p,
+                -pi_c_m * s_ac_m
+                - pi_g_m * s_ag_m
+                - pi_t_m * s_at_m
+                - pi_a_p * s_at_p
+                - pi_c_p * s_ct_p
+                - pi_g_p * s_gt_p,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_c_m) * s_ac_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_g_m) * s_ag_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_t_m) * s_at_m,
+            ],
+            [
+                np.sqrt(pi_a_m * pi_c_m) * s_ac_m,
+                0,
+                0,
+                0,
+                -pi_a_m * s_ac_m
+                - pi_c_p * s_ac_p
+                - pi_g_p * s_ag_p
+                - pi_t_p * s_at_p
+                - pi_g_m * s_cg_m
+                - pi_t_m * s_ct_m,
+                np.sqrt(pi_a_p * pi_c_p) * s_ac_p,
+                np.sqrt(pi_a_p * pi_g_p) * s_ag_p,
+                np.sqrt(pi_a_p * pi_t_p) * s_at_p,
+                np.sqrt(pi_c_m * pi_g_m) * s_cg_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_t_m) * s_ct_m,
+                0,
+                0,
+                0,
+            ],
+            [
+                0,
+                np.sqrt(pi_a_m * pi_c_m) * s_ac_m,
+                0,
+                0,
+                np.sqrt(pi_a_p * pi_c_p) * s_ac_p,
+                -pi_a_m * s_ac_m
+                - pi_a_p * s_ac_p
+                - pi_g_m * s_cg_m
+                - pi_g_p * s_cg_p
+                - pi_t_m * s_ct_m
+                - pi_t_p * s_ct_p,
+                np.sqrt(pi_c_p * pi_g_p) * s_cg_p,
+                np.sqrt(pi_c_p * pi_t_p) * s_ct_p,
+                0,
+                np.sqrt(pi_c_m * pi_g_m) * s_cg_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_t_m) * s_ct_m,
+                0,
+                0,
+            ],
+            [
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_c_m) * s_ac_m,
+                0,
+                np.sqrt(pi_a_p * pi_g_p) * s_ag_p,
+                np.sqrt(pi_c_p * pi_g_p) * s_cg_p,
+                -pi_a_m * s_ac_m
+                - pi_a_p * s_ag_p
+                - pi_g_m * s_cg_m
+                - pi_c_p * s_cg_p
+                - pi_t_m * s_ct_m
+                - pi_t_p * s_gt_p,
+                np.sqrt(pi_g_p * pi_t_p) * s_gt_p,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_g_m) * s_cg_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_t_m) * s_ct_m,
+                0,
+            ],
+            [
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_c_m) * s_ac_m,
+                np.sqrt(pi_a_p * pi_t_p) * s_at_p,
+                np.sqrt(pi_c_p * pi_t_p) * s_ct_p,
+                np.sqrt(pi_g_p * pi_t_p) * s_gt_p,
+                -pi_a_m * s_ac_m
+                - pi_a_p * s_at_p
+                - pi_g_m * s_cg_m
+                - pi_t_m * s_ct_m
+                - pi_c_p * s_ct_p
+                - pi_g_p * s_gt_p,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_g_m) * s_cg_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_t_m) * s_ct_m,
+            ],
+            [
+                np.sqrt(pi_a_m * pi_g_m) * s_ag_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_g_m) * s_cg_m,
+                0,
+                0,
+                0,
+                -pi_c_p * s_ac_p
+                - pi_a_m * s_ag_m
+                - pi_g_p * s_ag_p
+                - pi_t_p * s_at_p
+                - pi_c_m * s_cg_m
+                - pi_t_m * s_gt_m,
+                np.sqrt(pi_a_p * pi_c_p) * s_ac_p,
+                np.sqrt(pi_a_p * pi_g_p) * s_ag_p,
+                np.sqrt(pi_a_p * pi_t_p) * s_at_p,
+                np.sqrt(pi_g_m * pi_t_m) * s_gt_m,
+                0,
+                0,
+                0,
+            ],
+            [
+                0,
+                np.sqrt(pi_a_m * pi_g_m) * s_ag_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_g_m) * s_cg_m,
+                0,
+                0,
+                np.sqrt(pi_a_p * pi_c_p) * s_ac_p,
+                -pi_a_p * s_ac_p
+                - pi_a_m * s_ag_m
+                - pi_c_m * s_cg_m
+                - pi_g_p * s_cg_p
+                - pi_t_p * s_ct_p
+                - pi_t_m * s_gt_m,
+                np.sqrt(pi_c_p * pi_g_p) * s_cg_p,
+                np.sqrt(pi_c_p * pi_t_p) * s_ct_p,
+                0,
+                np.sqrt(pi_g_m * pi_t_m) * s_gt_m,
+                0,
+                0,
+            ],
+            [
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_g_m) * s_ag_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_g_m) * s_cg_m,
+                0,
+                np.sqrt(pi_a_p * pi_g_p) * s_ag_p,
+                np.sqrt(pi_c_p * pi_g_p) * s_cg_p,
+                -pi_a_m * s_ag_m
+                - pi_a_p * s_ag_p
+                - pi_c_m * s_cg_m
+                - pi_c_p * s_cg_p
+                - pi_t_m * s_gt_m
+                - pi_t_p * s_gt_p,
+                np.sqrt(pi_g_p * pi_t_p) * s_gt_p,
+                0,
+                0,
+                np.sqrt(pi_g_m * pi_t_m) * s_gt_m,
+                0,
+            ],
+            [
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_g_m) * s_ag_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_g_m) * s_cg_m,
+                np.sqrt(pi_a_p * pi_t_p) * s_at_p,
+                np.sqrt(pi_c_p * pi_t_p) * s_ct_p,
+                np.sqrt(pi_g_p * pi_t_p) * s_gt_p,
+                -pi_a_m * s_ag_m
+                - pi_a_p * s_at_p
+                - pi_c_m * s_cg_m
+                - pi_c_p * s_ct_p
+                - pi_t_m * s_gt_m
+                - pi_g_p * s_gt_p,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g_m * pi_t_m) * s_gt_m,
+            ],
+            [
+                np.sqrt(pi_a_m * pi_t_m) * s_at_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_t_m) * s_ct_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g_m * pi_t_m) * s_gt_m,
+                0,
+                0,
+                0,
+                -pi_c_p * s_ac_p
+                - pi_g_p * s_ag_p
+                - pi_a_m * s_at_m
+                - pi_t_p * s_at_p
+                - pi_c_m * s_ct_m
+                - pi_g_m * s_gt_m,
+                np.sqrt(pi_a_p * pi_c_p) * s_ac_p,
+                np.sqrt(pi_a_p * pi_g_p) * s_ag_p,
+                np.sqrt(pi_a_p * pi_t_p) * s_at_p,
+            ],
+            [
+                0,
+                np.sqrt(pi_a_m * pi_t_m) * s_at_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_t_m) * s_ct_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g_m * pi_t_m) * s_gt_m,
+                0,
+                0,
+                np.sqrt(pi_a_p * pi_c_p) * s_ac_p,
+                -pi_a_p * s_ac_p
+                - pi_a_m * s_at_m
+                - pi_g_p * s_cg_p
+                - pi_c_m * s_ct_m
+                - pi_t_p * s_ct_p
+                - pi_g_m * s_gt_m,
+                np.sqrt(pi_c_p * pi_g_p) * s_cg_p,
+                np.sqrt(pi_c_p * pi_t_p) * s_ct_p,
+            ],
+            [
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_t_m) * s_at_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_t_m) * s_ct_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g_m * pi_t_m) * s_gt_m,
+                0,
+                np.sqrt(pi_a_p * pi_g_p) * s_ag_p,
+                np.sqrt(pi_c_p * pi_g_p) * s_cg_p,
+                -pi_a_p * s_ag_p
+                - pi_a_m * s_at_m
+                - pi_c_p * s_cg_p
+                - pi_c_m * s_ct_m
+                - pi_g_m * s_gt_m
+                - pi_t_p * s_gt_p,
+                np.sqrt(pi_g_p * pi_t_p) * s_gt_p,
+            ],
+            [
+                0,
+                0,
+                0,
+                np.sqrt(pi_a_m * pi_t_m) * s_at_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c_m * pi_t_m) * s_ct_m,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g_m * pi_t_m) * s_gt_m,
+                np.sqrt(pi_a_p * pi_t_p) * s_at_p,
+                np.sqrt(pi_c_p * pi_t_p) * s_ct_p,
+                np.sqrt(pi_g_p * pi_t_p) * s_gt_p,
+                -pi_a_m * s_at_m
+                - pi_a_p * s_at_p
+                - pi_c_m * s_ct_m
+                - pi_c_p * s_ct_p
+                - pi_g_m * s_gt_m
+                - pi_g_p * s_gt_p,
+            ],
+        ],
+        dtype=np.float64,
+    )
+
+
+def make_GTRxGTR_prob_model(pis, model_params, *, vec=False):
+    sym_Q = Qsym_GTRxGTR(pis, model_params)
+
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
+
+        left = sym_evecs / np.sqrt(pis)[:, None]
+        right = sym_evecs.T * np.sqrt(pis)
+
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+
+
+####################################################################################################
+
+
+def phased_rate(pis, s_is):
+    square_pi = pis.reshape(4, 4)
+    pi_a, pi_c, pi_g, pi_t = (np.sum(square_pi, axis=1) + np.sum(square_pi, axis=0)) / 2
+    s_ac, s_ag, s_at, s_cg, s_ct, s_gt = s_is
+
+    return 4 * (
+        pi_a * pi_c * s_ac
+        + pi_a * pi_g * s_ag
+        + pi_a * pi_t * s_at
+        + pi_c * pi_g * s_cg
+        + pi_c * pi_t * s_ct
+        + pi_g * pi_t * s_gt
+    )
+
+
+def Qsym_GTRsq(pis, s_is):
+    square_pi = pis.reshape(4, 4)
+    pi_a, pi_c, pi_g, pi_t = (np.sum(square_pi, axis=1) + np.sum(square_pi, axis=0)) / 2
+    s_ac, s_ag, s_at, s_cg, s_ct, s_gt = s_is
+
+    return np.array(
+        [
+            [
+                -2 * pi_c * s_ac - 2 * pi_g * s_ag - 2 * pi_t * s_at,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                np.sqrt(pi_a * pi_t) * s_at,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_t) * s_at,
+                0,
+                0,
+                0,
+            ],
+            [
+                np.sqrt(pi_a * pi_c) * s_ac,
+                -pi_a * s_ac - pi_c * s_ac - pi_g * s_ag - pi_t * s_at - pi_g * s_cg - pi_t * s_ct,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                0,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_t) * s_at,
+                0,
+                0,
+            ],
+            [
+                np.sqrt(pi_a * pi_g) * s_ag,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                -pi_c * s_ac - pi_a * s_ag - pi_g * s_ag - pi_t * s_at - pi_c * s_cg - pi_t * s_gt,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                0,
+                0,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_t) * s_at,
+                0,
+            ],
+            [
+                np.sqrt(pi_a * pi_t) * s_at,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                -pi_c * s_ac - pi_g * s_ag - pi_a * s_at - pi_t * s_at - pi_c * s_ct - pi_g * s_gt,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_t) * s_at,
+            ],
+            [
+                np.sqrt(pi_a * pi_c) * s_ac,
+                0,
+                0,
+                0,
+                -pi_a * s_ac - pi_c * s_ac - pi_g * s_ag - pi_t * s_at - pi_g * s_cg - pi_t * s_ct,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                np.sqrt(pi_a * pi_t) * s_at,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                0,
+                0,
+                0,
+            ],
+            [
+                0,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                0,
+                0,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                -2 * pi_a * s_ac - 2 * pi_g * s_cg - 2 * pi_t * s_ct,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                0,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                0,
+                0,
+            ],
+            [
+                0,
+                0,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                0,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                -pi_a * s_ac - pi_a * s_ag - pi_c * s_cg - pi_g * s_cg - pi_t * s_ct - pi_t * s_gt,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                0,
+                0,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                0,
+            ],
+            [
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                np.sqrt(pi_a * pi_t) * s_at,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                -pi_a * s_ac - pi_a * s_at - pi_g * s_cg - pi_c * s_ct - pi_t * s_ct - pi_g * s_gt,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_t) * s_ct,
+            ],
+            [
+                np.sqrt(pi_a * pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                0,
+                0,
+                0,
+                -pi_c * s_ac - pi_a * s_ag - pi_g * s_ag - pi_t * s_at - pi_c * s_cg - pi_t * s_gt,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                np.sqrt(pi_a * pi_t) * s_at,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                0,
+                0,
+                0,
+            ],
+            [
+                0,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                0,
+                0,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                -pi_a * s_ac - pi_a * s_ag - pi_c * s_cg - pi_g * s_cg - pi_t * s_ct - pi_t * s_gt,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                0,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                0,
+                0,
+            ],
+            [
+                0,
+                0,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                0,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                -2 * pi_a * s_ag - 2 * pi_c * s_cg - 2 * pi_t * s_gt,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                0,
+                0,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                0,
+            ],
+            [
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                np.sqrt(pi_a * pi_t) * s_at,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                -pi_a * s_ag - pi_a * s_at - pi_c * s_cg - pi_c * s_ct - pi_g * s_gt - pi_t * s_gt,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g * pi_t) * s_gt,
+            ],
+            [
+                np.sqrt(pi_a * pi_t) * s_at,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                0,
+                0,
+                0,
+                -pi_c * s_ac - pi_g * s_ag - pi_a * s_at - pi_t * s_at - pi_c * s_ct - pi_g * s_gt,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                np.sqrt(pi_a * pi_t) * s_at,
+            ],
+            [
+                0,
+                np.sqrt(pi_a * pi_t) * s_at,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                0,
+                0,
+                np.sqrt(pi_a * pi_c) * s_ac,
+                -pi_a * s_ac - pi_a * s_at - pi_g * s_cg - pi_c * s_ct - pi_t * s_ct - pi_g * s_gt,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                np.sqrt(pi_c * pi_t) * s_ct,
+            ],
+            [
+                0,
+                0,
+                np.sqrt(pi_a * pi_t) * s_at,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                0,
+                np.sqrt(pi_a * pi_g) * s_ag,
+                np.sqrt(pi_c * pi_g) * s_cg,
+                -pi_a * s_ag - pi_a * s_at - pi_c * s_cg - pi_c * s_ct - pi_g * s_gt - pi_t * s_gt,
+                np.sqrt(pi_g * pi_t) * s_gt,
+            ],
+            [
+                0,
+                0,
+                0,
+                np.sqrt(pi_a * pi_t) * s_at,
+                0,
+                0,
+                0,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                0,
+                0,
+                0,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                np.sqrt(pi_a * pi_t) * s_at,
+                np.sqrt(pi_c * pi_t) * s_ct,
+                np.sqrt(pi_g * pi_t) * s_gt,
+                -2 * pi_a * s_at - 2 * pi_c * s_ct - 2 * pi_g * s_gt,
+            ],
+        ],
+        dtype=np.float64,
+    )
+
+
+def make_GTRsq_prob_model(pis, model_params, *, vec=False):
+    sym_Q = Qsym_GTRsq(pis, model_params)
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
+
+        left = sym_evecs / np.sqrt(pis)[:, None]
+        right = sym_evecs.T * np.sqrt(pis)
+
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
 
 
 ####################################################################################################
@@ -183,19 +958,19 @@ def gtr10_rate(pi10s, s_is):
         s_16, s_17, s_18, s_19, s_20, s_21, s_22, s_23, s_24, s_25, s_26, s_27, s_28, s_29, s_30,
         s_31, s_32, s_33, s_34, s_35, s_36, s_37, s_38, s_39, s_40, s_41, s_42, s_43, s_44, s_45,
     ) = s_is
-    return (
-          (pi_aa + pi_cc) * s_1  + (pi_aa + pi_gg) * s_2  + (pi_aa + pi_tt) * s_3  + (pi_aa + pi_ac) * s_4
-        + (pi_aa + pi_ag) * s_5  + (pi_aa + pi_at) * s_6  + (pi_aa + pi_cg) * s_7  + (pi_aa + pi_ct) * s_8
-        + (pi_aa + pi_gt) * s_9  + (pi_cc + pi_gg) * s_10 + (pi_cc + pi_tt) * s_11 + (pi_ac + pi_cc) * s_12
-        + (pi_ag + pi_cc) * s_13 + (pi_at + pi_cc) * s_14 + (pi_cc + pi_cg) * s_15 + (pi_cc + pi_ct) * s_16
-        + (pi_cc + pi_gt) * s_17 + (pi_gg + pi_tt) * s_18 + (pi_ac + pi_gg) * s_19 + (pi_ag + pi_gg) * s_20
-        + (pi_at + pi_gg) * s_21 + (pi_cg + pi_gg) * s_22 + (pi_ct + pi_gg) * s_23 + (pi_gg + pi_gt) * s_24
-        + (pi_ac + pi_tt) * s_25 + (pi_ag + pi_tt) * s_26 + (pi_at + pi_tt) * s_27 + (pi_cg + pi_tt) * s_28
-        + (pi_ct + pi_tt) * s_29 + (pi_gt + pi_tt) * s_30 + (pi_ac + pi_ag) * s_31 + (pi_ac + pi_at) * s_32
-        + (pi_ac + pi_cg) * s_33 + (pi_ac + pi_ct) * s_34 + (pi_ac + pi_gt) * s_35 + (pi_ag + pi_at) * s_36
-        + (pi_ag + pi_cg) * s_37 + (pi_ag + pi_ct) * s_38 + (pi_ag + pi_gt) * s_39 + (pi_at + pi_cg) * s_40
-        + (pi_at + pi_ct) * s_41 + (pi_at + pi_gt) * s_42 + (pi_cg + pi_ct) * s_43 + (pi_cg + pi_gt) * s_44
-        + (pi_ct + pi_gt) * s_45
+    return 2 * (
+          pi_aa * pi_cc * s_1  + pi_aa * pi_gg * s_2  + pi_aa * pi_tt * s_3  + pi_aa * pi_ac * s_4
+        + pi_aa * pi_ag * s_5  + pi_aa * pi_at * s_6  + pi_aa * pi_cg * s_7  + pi_aa * pi_ct * s_8
+        + pi_aa * pi_gt * s_9  + pi_cc * pi_gg * s_10 + pi_cc * pi_tt * s_11 + pi_ac * pi_cc * s_12
+        + pi_ag * pi_cc * s_13 + pi_at * pi_cc * s_14 + pi_cc * pi_cg * s_15 + pi_cc * pi_ct * s_16
+        + pi_cc * pi_gt * s_17 + pi_gg * pi_tt * s_18 + pi_ac * pi_gg * s_19 + pi_ag * pi_gg * s_20
+        + pi_at * pi_gg * s_21 + pi_cg * pi_gg * s_22 + pi_ct * pi_gg * s_23 + pi_gg * pi_gt * s_24
+        + pi_ac * pi_tt * s_25 + pi_ag * pi_tt * s_26 + pi_at * pi_tt * s_27 + pi_cg * pi_tt * s_28
+        + pi_ct * pi_tt * s_29 + pi_gt * pi_tt * s_30 + pi_ac * pi_ag * s_31 + pi_ac * pi_at * s_32
+        + pi_ac * pi_cg * s_33 + pi_ac * pi_ct * s_34 + pi_ac * pi_gt * s_35 + pi_ag * pi_at * s_36
+        + pi_ag * pi_cg * s_37 + pi_ag * pi_ct * s_38 + pi_ag * pi_gt * s_39 + pi_at * pi_cg * s_40
+        + pi_at * pi_ct * s_41 + pi_at * pi_gt * s_42 + pi_cg * pi_ct * s_43 + pi_cg * pi_gt * s_44
+        + pi_ct * pi_gt * s_45
     )
     # @formatter:on
     # fmt: on
@@ -423,16 +1198,28 @@ def Qsym_gtr10(pi10s, s_is):
 def make_gtr10_prob_model(pis, model_params, *, vec=False):
     # print(f"make_gtr10_prob_model({pis=},{model_params=},{vec=})")
     sym_Q = Qsym_gtr10(pis, model_params)
-    evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    # Q_gtr10 = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_gtr10 @ np.diag([np.sqrt(x) for x in pi10s])
-    left = sym_evecs / np.sqrt(pis)[:, None]
-    right = sym_evecs.T * np.sqrt(pis)
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    if vec:
-        return lambda t: prob_model_helper_vec(t, left, right, evals)
-    else:
-        return lambda t: prob_model_helper(t, left, right, evals)
+        # Q_gtr10 = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_gtr10 @ np.diag([np.sqrt(x) for x in pi10s])
+        left = sym_evecs / np.sqrt(pis)[:, None]
+        right = sym_evecs.T * np.sqrt(pis)
+
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
 
 
 ####################################################################################################
@@ -443,37 +1230,20 @@ def gtr10z_rate(pi10s, s_is):
     # fmt: off
     # @formatter:off
     (
-        s_1,  s_2,  s_3,  s_4,  s_5,  s_6,  s_7,  s_8,  s_9, s_10, s_11, s_12, s_13, s_14, s_15,
-        s_16, s_17, s_18, s_19, s_20, s_21, s_22, s_23, s_24
+        s_1 , s_2 , s_3 , s_4 , s_5 , s_6 , s_7 , s_8 , s_9 , s_10,
+        s_11, s_12, s_13, s_14, s_15, s_16, s_17, s_18, s_19, s_20,
+        s_21, s_22, s_23, s_24
     ) = s_is
+    return 2 * (
+          pi_aa * pi_ac * s_1  + pi_aa * pi_ag * s_2  + pi_aa * pi_at * s_3  + pi_ac * pi_cc * s_4
+        + pi_cc * pi_cg * s_5  + pi_cc * pi_ct * s_6  + pi_ag * pi_gg * s_7  + pi_cg * pi_gg * s_8
+        + pi_gg * pi_gt * s_9  + pi_at * pi_tt * s_10 + pi_ct * pi_tt * s_11 + pi_gt * pi_tt * s_12
+        + pi_ac * pi_ag * s_13 + pi_ac * pi_at * s_14 + pi_ac * pi_cg * s_15 + pi_ac * pi_ct * s_16
+        + pi_ag * pi_at * s_17 + pi_ag * pi_cg * s_18 + pi_ag * pi_gt * s_19 + pi_at * pi_ct * s_20
+        + pi_at * pi_gt * s_21 + pi_cg * pi_ct * s_22 + pi_cg * pi_gt * s_23 + pi_ct * pi_gt * s_24
+    )
     # @formatter:on
     # fmt: on
-    return (
-        (pi_aa + pi_ac) * s_1
-        + (pi_aa + pi_ag) * s_2
-        + (pi_aa + pi_at) * s_3
-        + (pi_ac + pi_cc) * s_4
-        + (pi_cc + pi_cg) * s_5
-        + (pi_cc + pi_ct) * s_6
-        + (pi_ag + pi_gg) * s_7
-        + (pi_cg + pi_gg) * s_8
-        + (pi_gg + pi_gt) * s_9
-        + (pi_at + pi_tt) * s_10
-        + (pi_ct + pi_tt) * s_11
-        + (pi_gt + pi_tt) * s_12
-        + (pi_ac + pi_ag) * s_13
-        + (pi_ac + pi_at) * s_14
-        + (pi_ac + pi_cg) * s_15
-        + (pi_ac + pi_ct) * s_16
-        + (pi_ag + pi_at) * s_17
-        + (pi_ag + pi_cg) * s_18
-        + (pi_ag + pi_gt) * s_19
-        + (pi_at + pi_ct) * s_20
-        + (pi_at + pi_gt) * s_21
-        + (pi_cg + pi_ct) * s_22
-        + (pi_cg + pi_gt) * s_23
-        + (pi_ct + pi_gt) * s_24
-    )
 
 
 def Qsym_gtr10z(pi10s, s_is):
@@ -647,16 +1417,28 @@ def Qsym_gtr10z(pi10s, s_is):
 def make_gtr10z_prob_model(pis, model_params, *, vec=False):
     # print(f"make_gtr10z_prob_model({pis=},{model_params=},{vec=})")
     sym_Q = Qsym_gtr10z(pis, model_params)
-    evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    # Q_gtr10z = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_gtr10z @ np.diag([np.sqrt(x) for x in pi10s])
-    left = sym_evecs / np.sqrt(pis)[:, None]
-    right = sym_evecs.T * np.sqrt(pis)
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    if vec:
-        return lambda t: prob_model_helper_vec(t, left, right, evals)
-    else:
-        return lambda t: prob_model_helper(t, left, right, evals)
+        # Q_gtr10z = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_gtr10z @ np.diag([np.sqrt(x) for x in pi10s])
+        left = sym_evecs / np.sqrt(pis)[:, None]
+        right = sym_evecs.T * np.sqrt(pis)
+
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
 
 
 ####################################################################################################
@@ -665,14 +1447,18 @@ def make_gtr10z_prob_model(pis, model_params, *, vec=False):
 def cellphy10_rate(pi10s, s_is):
     pi_aa, pi_cc, pi_gg, pi_tt, pi_ac, pi_ag, pi_at, pi_cg, pi_ct, pi_gt = pi10s
     s_1, s_2, s_3, s_4, s_5, s_6 = s_is
-    return (
-        (pi_aa + 2 * pi_ac + pi_ag + pi_at + pi_cc + pi_cg + pi_ct) * s_1
-        + (pi_aa + pi_ac + 2 * pi_ag + pi_at + pi_cg + pi_gg + pi_gt) * s_2
-        + (pi_aa + pi_ac + pi_ag + 2 * pi_at + pi_ct + pi_gt + pi_tt) * s_3
-        + (pi_ac + pi_ag + pi_cc + 2 * pi_cg + pi_ct + pi_gg + pi_gt) * s_4
-        + (pi_ac + pi_at + pi_cc + pi_cg + 2 * pi_ct + pi_gt + pi_tt) * s_5
-        + (pi_ag + pi_at + pi_cg + pi_ct + pi_gg + 2 * pi_gt + pi_tt) * s_6
+    # fmt: off
+    # @formatter:off
+    return 2 * (
+          (pi_aa * pi_ac + pi_ac * pi_cc + pi_ag * pi_cg + pi_at * pi_ct) * s_1
+        + (pi_aa * pi_ag + pi_ac * pi_cg + pi_ag * pi_gg + pi_at * pi_gt) * s_2
+        + (pi_aa * pi_at + pi_ac * pi_ct + pi_ag * pi_gt + pi_at * pi_tt) * s_3
+        + (pi_ac * pi_ag + pi_cc * pi_cg + pi_cg * pi_gg + pi_ct * pi_gt) * s_4
+        + (pi_ac * pi_at + pi_cc * pi_ct + pi_cg * pi_gt + pi_ct * pi_tt) * s_5
+        + (pi_ag * pi_at + pi_cg * pi_ct + pi_gg * pi_gt + pi_gt * pi_tt) * s_6
     )
+    # @formatter:on
+    # fmt: on
 
 
 def Qsym_cellphy10(pi10s, s_is):
@@ -809,16 +1595,28 @@ def Qsym_cellphy10(pi10s, s_is):
 def make_cellphy_prob_model(pis, model_params, *, vec=False):
     # print(f"make_cellphy_prob_model({pis=},{model_params=},{vec=})")
     sym_Q = Qsym_cellphy10(pis, model_params)
-    evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    # Q_cellphy10 = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_cellphy10 @ np.diag([np.sqrt(x) for x in pi10s])
-    left = sym_evecs / np.sqrt(pis)[:, None]
-    right = sym_evecs.T * np.sqrt(pis)
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    if vec:
-        return lambda t: prob_model_helper_vec(t, left, right, evals)
-    else:
-        return lambda t: prob_model_helper(t, left, right, evals)
+        # Q_cellphy10 = np.diag([1/np.sqrt(x) for x in pi10s]) @ Qsym_cellphy10 @ np.diag([np.sqrt(x) for x in pi10s])
+        left = sym_evecs / np.sqrt(pis)[:, None]
+        right = sym_evecs.T * np.sqrt(pis)
+
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
 
 
 ####################################################################################################
@@ -874,24 +1672,35 @@ def Qsym_gtr4(pis, model_params):
 def make_GTR_prob_model(pis, gtr_params, *, vec=False):
 
     sym_Q = Qsym_gtr4(pis, gtr_params)
-    evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    left = sym_evecs * np.sqrt(pis)[:, None]
-    right = sym_evecs.T / np.sqrt(pis)
+    try:
+        evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-    if vec:
-        return lambda t: prob_model_helper_vec(t, left, right, evals)
-    else:
-        return lambda t: prob_model_helper(t, left, right, evals)
+        left = sym_evecs * np.sqrt(pis)[:, None]
+        right = sym_evecs.T / np.sqrt(pis)
+
+        if vec:
+            return lambda t: prob_model_helper_vec(t, left, right, evals)
+        else:
+            return lambda t: prob_model_helper(t, left, right, evals)
+
+    except LinAlgError:
+        if vec:
+            return lambda t: scipy.linalg.expm(
+                t[:, None, None] * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
+        else:
+            return lambda t: scipy.linalg.expm(
+                t * np.diag(1 / np.sqrt(pis)) @ sym_Q @ np.diag(np.sqrt(pis))
+            )
 
 
-def make_unphased_GTRsq_prob_model(pis, model_params, *, vec=False):
-    pi_a, pi_c, pi_g, pi_t = np.abs(pis)
+def make_unphased_GTRsq_prob_model(pis10, rate_params, *, vec=False):
+    pi_a, pi_c, pi_g, pi_t = pi10s_to_pi4s(pis10)
     # print(f"{pi_a=} {pi_c=} {pi_g=} {pi_t=}")
-    s_ac, s_ag, s_at, s_cg, s_ct, s_gt = np.abs(model_params)
+    s_ac, s_ag, s_at, s_cg, s_ct, s_gt = np.abs(rate_params)
     # print(f"{s_ac=} {s_ag=} {s_at=} {s_cg=} {s_ct=} {s_gt=}")
 
-    pi10s = np.kron(pis, pis) @ perm @ V
     model_params10 = np.array(
         [
             s_ac / pi_a,
@@ -921,4 +1730,57 @@ def make_unphased_GTRsq_prob_model(pis, model_params, *, vec=False):
         ]
     )
 
-    return make_gtr10z_prob_model(pi10s, model_params10, vec=vec)
+    return make_gtr10z_prob_model(pis10, model_params10, vec=vec)
+
+
+def unphased_rate(pis10, s_is):
+    pi_a, pi_c, pi_g, pi_t = pi10s_to_pi4s(pis10)
+    s_ac, s_ag, s_at, s_cg, s_ct, s_gt = s_is
+
+    return 4 * (
+        pi_a * pi_c * s_ac
+        + pi_a * pi_g * s_ag
+        + pi_a * pi_t * s_at
+        + pi_c * pi_g * s_cg
+        + pi_c * pi_t * s_ct
+        + pi_g * pi_t * s_gt
+    )
+
+
+####################################################################################################
+# 10/4 state conversions
+
+
+def pi10s_to_pi4s(pi10s):
+    """
+    Convert 10 state frequencies to 4 state frequencies
+
+    :param pi10s: 10 state frequencies
+    :return:
+    """
+    pi_aa, pi_cc, pi_gg, pi_tt, pi_ac, pi_ag, pi_at, pi_cg, pi_ct, pi_gt = pi10s
+
+    pi_a = pi_aa + pi_ac / 2 + pi_ag / 2 + pi_at / 2
+    pi_c = pi_ac / 2 + pi_cc + pi_cg / 2 + pi_ct / 2
+    pi_g = pi_ag / 2 + pi_cg / 2 + pi_gg + pi_gt / 2
+    pi_t = pi_at / 2 + pi_ct / 2 + pi_gt / 2 + pi_tt
+    return np.array([pi_a, pi_c, pi_g, pi_t])
+
+
+def pi4s_to_unphased_pi10s(pi4s):
+    """
+    Generate unphased 10 state frequencies from 4 state frequencies
+    :param pi4s:
+    :return:
+    """
+    return np.kron(pi4s, pi4s) @ perm @ V
+
+
+def unphased_freq_param_cleanup(freq_params):
+    """
+    Project a set of 10 state frequency parameters to one that obeys the hypotheses of the lumped unphased model.
+
+    :param freq_params:
+    :return:
+    """
+    return pi4s_to_unphased_pi10s(pi10s_to_pi4s(freq_params))

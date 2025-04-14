@@ -217,28 +217,34 @@ def print_cellphy10_params(s_est, pis_est):
     print()
 
 
-def print_stats(*, s_est, pis_est, neg_l, tree_distances, true_branch_lens, model):
+def print_stats(*, rate_params, freq_params, neg_l, tree_distances, true_branch_lens, model):
     import numpy as np
 
     print(f"neg log likelihood: {neg_l}")
     print()
 
     match model:
-        case "DNA" | "PHASED_DNA" | "UNPHASED_DNA":
-            print_dna_params(s_est, pis_est)
+        case "DNA" | "PHASED_DNA4":
+            print_dna_params(rate_params, freq_params)
         case "CELLPHY":
-            print_cellphy10_params(s_est, pis_est)
+            print_cellphy10_params(rate_params, freq_params)
         case "GTR10Z":
-            print_gtr10z_params(s_est, pis_est)
+            print_gtr10z_params(rate_params, freq_params)
         case "GTR10":
-            print_gtr10_params(s_est, pis_est)
+            print_gtr10_params(rate_params, freq_params)
+        # case "UNPHASED_DNA":
+        #     pass
+        # case "PHASED_DNA16":
+        #     pass
+        # case "PHASED_DNA16_MP":
+        #     pass
         # case "SIEVE":
         #     # TODO: per model code
         #     pass
         case _:
-            print(f"{s_est=}")
+            print(f"{rate_params=}")
             print()
-            print(f"{pis_est=}")
+            print(f"{freq_params=}")
             print()
 
     print("tree dist stats:")
@@ -260,3 +266,8 @@ def print_stats(*, s_est, pis_est, neg_l, tree_distances, true_branch_lens, mode
     print(f"max rel error: {np.max(rel_error) if len(rel_error) > 0 else float('nan')}")
     print(f"mean rel error: {np.mean(rel_error) if len(rel_error) > 0 else float('nan')}")
     print(f"stdev rel error: {np.std(rel_error) if len(rel_error) > 0 else float('nan')}")
+
+
+def rate_param_cleanup(x, log_freq_params, ploidy, rate_constraint):
+    rate_params = np.maximum(0.0, x)
+    return rate_params * ploidy / rate_constraint(np.exp(log_freq_params), rate_params)

@@ -5,9 +5,8 @@ def main_cli():
     import sys
     from collections import defaultdict
     from contextlib import redirect_stdout
-    from typing import Callable, Literal
+    from typing import Literal
 
-    import numba
     import numpy as np
     from ete3 import Tree
     from scipy.optimize import minimize
@@ -24,16 +23,25 @@ def main_cli():
         make_gtr10_prob_model,
         make_gtr10z_prob_model,
         make_GTR_prob_model,
+        make_GTRsq_prob_model,
+        make_GTRxGTR_prob_model,
         make_unphased_GTRsq_prob_model,
         perm,
+        phased_mp_rate,
+        phased_rate,
+        pi4s_to_unphased_pi10s,
+        pi10s_to_pi4s,
+        unphased_freq_param_cleanup,
+        unphased_rate,
     )
     from pruning.objective_functions import (
         branch_length_objective_prototype,
-        full_param_objective_prototype,
         param_objective_prototype,
-        params_distances_objective_prototype,
+        rate_param_objective_prototype,
+        rates_distances_objective_prototype,
     )
     from pruning.path_constraints import make_path_constraints
+    from pruning.score_function_gen import compute_score_function, neg_log_likelihood_prototype
     from pruning.util import (
         CallbackIR,
         CallbackParam,
@@ -41,9 +49,20 @@ def main_cli():
         log_dot,
         log_matrix_mult,
         print_stats,
+        rate_param_cleanup,
     )
 
-    model_list = ["DNA", "PHASED_DNA", "UNPHASED_DNA", "CELLPHY", "GTR10Z", "GTR10", "SIEVE"]
+    model_list = [
+        "DNA",
+        "PHASED_DNA4",
+        "PHASED_DNA16",
+        "PHASED_DNA16_MP",
+        "UNPHASED_DNA",
+        "CELLPHY",
+        "GTR10Z",
+        "GTR10",
+        "SIEVE",
+    ]
 
     parser = argparse.ArgumentParser(
         description="Compute log likelihood using the pruning algorithm"
@@ -64,27 +83,63 @@ def main_cli():
         help="Datatype for sequence",
         choices=model_list,
     )
-    parser.add_argument(
-        "--optimize_freqs",
+
+    ################################################################################
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--optimize_freq_params",
         action="store_true",
-        help="optimize frequencies using maximum likelihood. otherwise, stick with default data estimate",
+        help="optimize frequency parameters using maximum likelihood",
     )
-    parser.add_argument(
-        "--method",
-        type=str,
-        default="L-BFGS-B",
-        help="scipy solver",
-        choices=[
-            "Nelder-Mead",
-            "L-BFGS-B",
-            "TNC",
-            "SLSQP",
-            "Powell",
-            "trust-constr",
-            "COBYLA",
-            "COBYQA",
-        ],
+    group.add_argument(
+        "--freq_params_from_seq",
+        action="store_true",
+        help="Estimate root distribution from sequence data (default)",
     )
+    group.add_argument(
+        "--fix_freq_params4",
+        nargs=4,
+        metavar=("pi_a", "pi_c", "pi_g", "pi_t"),
+        help="",
+        type=float,
+        default=None,
+    )
+    group.add_argument(
+        "--fix_freq_params10",
+        nargs=10,
+        # fmt: off
+        # @formatter:off
+        metavar=(
+            "pi_aa", "pi_cc", "pi_gg", "pi_tt",
+            "pi_ac", "pi_ag", "pi_at",
+            "pi_cg", "pi_ct",
+            "pi_gt",
+        ),
+        # @formatter:on
+        # fmt: on
+        help="",
+        type=float,
+        default=None,
+    )
+    group.add_argument(
+        "--fix_freq_params16",
+        nargs=16,
+        # fmt: off
+        # @formatter:off
+        metavar=(
+            "pi_aa", "pi_ac", "pi_ag", "pi_at",
+            "pi_ca", "pi_cc", "pi_cg", "pi_ct",
+            "pi_ga", "pi_gc", "pi_gg", "pi_gt",
+            "pi_ta", "pi_tc", "pi_tg", "pi_tt",
+        ),
+        # @formatter:on
+        # fmt: on
+        help="",
+        type=float,
+        default=None,
+    )
+    ################################################################################
+
     parser.add_argument("--ambig", type=str, default="?", help="ambiguity character")
     parser.add_argument("--output", type=str, help="output filename prefix for tree")
     parser.add_argument("--overwrite", action="store_true", help="overwrite outputs, if they exist")
@@ -108,7 +163,24 @@ def main_cli():
         print("output files from previous run present, exiting.")
         exit()
 
-    model: Literal["DNA", "PHASED_DNA", "UNPHASED_DNA", "CELLPHY", "GTR10Z", "GTR10"] = opt.model
+    model: Literal[
+        "DNA",
+        "PHASED_DNA4",
+        "PHASED_DNA16",
+        "PHASED_DNA16_MP",
+        "UNPHASED_DNA",
+        "CELLPHY",
+        "GTR10Z",
+        "GTR10",
+    ] = opt.model
+
+    match model:
+        case "DNA" | "PHASED_DNA4":
+            ploidy = 1
+        case "PHASED_DNA16" | "PHASED_DNA16_MP" | "UNPHASED_DNA" | "CELLPHY" | "GTR10Z" | "GTR10":
+            ploidy = 2
+        case _:
+            raise NotImplementedError("Unknown model")
 
     ambig_char = opt.ambig.upper()
     if len(ambig_char) != 1:
@@ -117,6 +189,31 @@ def main_cli():
     if ambig_char in ["A", "C", "G", "T"]:
         print(f"Ambiguity character as '{ambig_char}' is not supported")
         exit(-1)
+
+    freq_params = None
+    if opt.optimize_freq_params:
+        freq_params_option = "OPTIMIZE"
+    elif opt.freq_params_from_seq:
+        freq_params_option = "FROM_SEQ"
+    elif opt.fix_freq_params4:
+        freq_params_option = "FIX4"
+        freq_params = np.array(opt.fix_freq_params4)
+    elif opt.fix_freq_params10:
+        freq_params_option = "FIX10"
+        freq_params = np.array(opt.fix_freq_params10)
+    elif opt.fix_freq_params16:
+        freq_params_option = "FIX16"
+        freq_params = np.array(opt.fix_freq_params16)
+    else:
+        freq_params_option = "FROM_SEQ"
+
+    ################################################################################
+    # solver options
+
+    solver_options = defaultdict(dict)
+    solver_options["L-BFGS-B"] = {"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10}
+    solver_options["Powell"] = {"maxiter": 1000, "ftol": 1e-10}
+    solver_options["Nelder-Mead"] = {"adaptive": True, "fatol": 0.1}
 
     ################################################################################
     # read the true tree
@@ -137,7 +234,24 @@ def main_cli():
     ################################################################################
     # read the sequence data and compute nucleotide frequencies
 
-    nsites, num_states, pis, pis10, sequences = read_sequences(ambig_char, model, opt)
+    nsites, num_states, seq_pis, seq_pis10, seq_pis16, sequences = read_sequences(
+        ambig_char, model, opt.seqs
+    )
+
+    if freq_params_option not in {"FIX4", "FIX10", "FIX16"}:
+        # if we are deriving this from sequence data, this is the correct value;
+        # if we are optimizing, this is a good initial seed value
+        match model:
+            case "DNA" | "PHASED_DNA4":
+                freq_params = seq_pis
+            case "UNPHASED_DNA" | "CELLPHY" | "GTR10Z" | "GTR10":
+                freq_params = seq_pis10
+                if model == "UNPHASED_DNA":
+                    freq_params = unphased_freq_param_cleanup(freq_params)
+            case "PHASED_DNA16" | "PHASED_DNA16_MP":
+                freq_params = seq_pis16
+            case _:
+                raise NotImplementedError("Missing a model?")
 
     assert set(true_tree.get_leaf_names()) == set(
         sequences.keys()
@@ -161,20 +275,20 @@ def main_cli():
     ################################################################################
     # initial estimates for branch lengths based on (generalized) F81 distances
 
-    tree_distances = compute_initial_tree_distance_estimates(
+    branch_lengths = compute_initial_tree_distance_estimates(
         model=model,
         node_indices=node_indices,
         num_tree_nodes=num_tree_nodes,
         opt=opt,
-        pis=pis,
+        pis=seq_pis,
         sequences=sequences,
         taxa=taxa,
         true_tree=true_tree,
     )
 
     if opt.log:
-        print("tree distances:")
-        print(tree_distances)
+        print("Branch length estimate:")
+        print(branch_lengths)
 
     # collect true tree data for comparison, likely on a different scale (GT transversion?), so not directly
     # comparable, but possibly good to have
@@ -186,171 +300,62 @@ def main_cli():
     # set rate constraint and initial estimates for GTR parameters
 
     match model:
-        case "DNA" | "PHASED_DNA" | "UNPHASED_DNA":
-
-            num_params = 6
-            pis_est = pis
+        case "DNA" | "PHASED_DNA4":
+            num_rate_params = 6
             rate_constraint = gtr4_rate
-            s_est = np.ones(6)
+            if freq_params is None:
+                freq_params = seq_pis
+
+        case "PHASED_DNA16":
+            num_rate_params = 6
+            rate_constraint = phased_rate
+            if freq_params is None:
+                freq_params = seq_pis16
+
+        case "PHASED_DNA16_MP":
+            num_rate_params = 12
+            rate_constraint = phased_mp_rate
+            if freq_params is None:
+                freq_params = seq_pis16
+
+        case "UNPHASED_DNA":
+            num_rate_params = 6
+            rate_constraint = unphased_rate
+            if freq_params is None:
+                freq_params = unphased_freq_param_cleanup(seq_pis10)
 
         case "CELLPHY":
-
-            num_params = 6
-            pis_est = pis10
+            num_rate_params = 6
             rate_constraint = cellphy10_rate
-            s_est = np.ones(6)
+            if freq_params is None:
+                freq_params = seq_pis10
 
         case "GTR10Z":
-
-            num_params = 24
-            pis_est = pis10
+            num_rate_params = 24
             rate_constraint = gtr10z_rate
-            s_est = np.ones(24)
+            if freq_params is None:
+                freq_params = seq_pis10
 
         case "GTR10":
-
-            num_params = 45
-            pis_est = pis10
+            num_rate_params = 45
             rate_constraint = gtr10_rate
-            s_est = np.ones(45)
+            if freq_params is None:
+                freq_params = seq_pis10
 
         case _:
             assert False, "Unknown model type"
 
-    s_est = s_est / rate_constraint(pis_est, s_est)
-    log_pis_est = np.log(pis_est)
-    num_pis = len(pis_est)
+    num_freq_params = len(freq_params)
+    with np.errstate(divide="ignore"):
+        log_freq_params = np.clip(np.log(freq_params), -1e100, 0.0)
+
+    rate_params = rate_param_cleanup(
+        np.ones(num_rate_params), log_freq_params, ploidy, rate_constraint
+    )
 
     ##########################################################################################
     # jointly optimize GTR params and branch lens using neg-log likelihood
     ##########################################################################################
-
-    def compute_leaf_vec(patterns, num_states) -> Callable:
-        # print(f"compute_leaf_vector({patterns=})")
-        match num_states:
-            case 4:
-                id4 = np.identity(4, dtype=np.float64)
-                arr = np.concatenate((id4, [np.ones(4) / 4]), axis=0)
-            case 10:
-                id10 = np.identity(10, dtype=np.float64)
-                arr = np.concatenate(
-                    (
-                        id10,
-                        [
-                            np.array([1, 1, 1, 1, 2, 2, 2, 2, 2, 2]) / 16,  # ?/?
-                            np.array([1, 0, 0, 0, 1, 1, 1, 0, 0, 0]) / 4,  # A/?
-                            np.array([0, 1, 0, 0, 1, 0, 0, 1, 1, 0]) / 4,  # C/?
-                            np.array([0, 0, 1, 0, 0, 1, 0, 1, 0, 1]) / 4,  # G/?
-                            np.array([0, 0, 0, 1, 0, 0, 1, 0, 1, 1]) / 4,  # T/?
-                        ],
-                    ),
-                    axis=0,
-                )
-            case _:
-                raise NotImplementedError(f"Num states = {num_states} not implemented")
-
-        with np.errstate(divide="ignore"):
-            result = np.clip(
-                np.log(np.array([arr[p, :] for p in patterns], dtype=np.float64)), -1e100, 0.0
-            )
-
-        # noinspection PyUnusedLocal
-        def local_score_function_terminal(prob_matrices: np.ndarray) -> np.ndarray:
-            return result
-
-        # return local_score_function_terminal
-        return numba.jit(local_score_function_terminal, nopython=True)
-
-    def compute_score_function_helper(node, patterns, taxa_indices_, num_states) -> Callable:
-        # taxa_indices_ should a dict who's keys are taxon names (str) and values should be the
-        # corresponding index (int) in the patterns.
-        # print(f"compute_score_function_helper({node=},{patterns=},{taxa_indices_=})")
-        assert len(node.children) == 2
-        left_node, right_node = node.children
-
-        left_leaf_names = set(leaf.name for leaf in left_node.iter_leaves())
-        right_leaf_names = set(leaf.name for leaf in right_node.iter_leaves())
-
-        left_leaf_idcs = tuple(
-            [idx for leaf_name, idx in taxa_indices_.items() if leaf_name in left_leaf_names]
-        )
-        right_leaf_idcs = tuple(
-            [idx for leaf_name, idx in taxa_indices_.items() if leaf_name in right_leaf_names]
-        )
-
-        left_taxa_rel_indices = {
-            name: idx
-            for idx, name in enumerate(
-                [leaf_name for leaf_name in taxa_indices_.keys() if leaf_name in left_leaf_names]
-            )
-        }
-        right_taxa_rel_indices = {
-            name: idx
-            for idx, name in enumerate(
-                [leaf_name for leaf_name in taxa_indices_.keys() if leaf_name in right_leaf_names]
-            )
-        }
-
-        left_patterns, left_pattern_inverse = np.unique(
-            patterns[:, left_leaf_idcs], axis=0, return_inverse=True
-        )
-        right_patterns, right_pattern_inverse = np.unique(
-            patterns[:, right_leaf_idcs], axis=0, return_inverse=True
-        )
-
-        if left_node.is_leaf():
-            w_l_function = compute_leaf_vec(left_patterns, num_states)
-        else:
-            w_l_function = compute_score_function_helper(
-                left_node, left_patterns, left_taxa_rel_indices, num_states
-            )
-
-        if right_node.is_leaf():
-            w_r_function = compute_leaf_vec(right_patterns, num_states)
-        else:
-            w_r_function = compute_score_function_helper(
-                right_node, right_patterns, right_taxa_rel_indices, num_states
-            )
-
-        left_index = node_indices[left_node.name]
-        right_index = node_indices[right_node.name]
-
-        def local_score_function_branching(prob_matrices: np.ndarray) -> np.ndarray:
-            w_l = w_l_function(prob_matrices)
-            w_r = w_r_function(prob_matrices)
-
-            with np.errstate(divide="ignore"):
-                p_l = np.clip(
-                    np.log(np.clip(prob_matrices[left_index, :, :], 0.0, 1.0)), -1e100, 0.0
-                )
-                p_r = np.clip(
-                    np.log(np.clip(prob_matrices[right_index, :, :], 0.0, 1.0)), -1e100, 0.0
-                )
-
-            v_n = np.clip(
-                log_matrix_mult(w_l[left_pattern_inverse], p_l)
-                + log_matrix_mult(w_r[right_pattern_inverse], p_r),
-                -1e100,
-                0.0,
-            )
-            return v_n
-
-        return local_score_function_branching
-
-    def compute_score_function(*, root, patterns, pattern_counts, num_states) -> Callable:
-        # print(f"compute_score_function({root=},{patterns=},{pattern_counts=})")
-        v_function = compute_score_function_helper(root, patterns, taxa_indices, num_states)
-
-        def score_function(log_pis, prob_matrices):
-            v = v_function(prob_matrices)
-            log_pis_corrected = log_pis - logsumexp(log_pis)  # can't assume that pis are normalized
-            return -kahan_dot(pattern_counts, log_dot(v, log_pis_corrected))
-
-        return numba.jit(score_function, nopython=False, forceobj=True)
-        # return score_function
-
-    ################################################################################
-    ################################################################################
 
     match opt.model:
         case "DNA":
@@ -359,10 +364,7 @@ def main_cli():
 
             prob_model_maker = make_GTR_prob_model
 
-            def log_pis_modification(log_pis):
-                return log_pis
-
-        case "PHASED_DNA":
+        case "PHASED_DNA4":
             genotype_counts = defaultdict(lambda: 0)
             for pattern, count in counts.items():
                 pattern_mat = tuple(map(lambda p: p % 5, pattern))
@@ -376,8 +378,17 @@ def main_cli():
 
             prob_model_maker = make_GTR_prob_model
 
-            def log_pis_modification(log_pis):
-                return log_pis
+        case "PHASED_DNA16":
+            patterns = np.array([pattern for pattern in counts.keys()])
+            pattern_counts = np.array([count for count in counts.values()])
+
+            prob_model_maker = make_GTRsq_prob_model
+
+        case "PHASED_DNA16_MP":
+            patterns = np.array([pattern for pattern in counts.keys()])
+            pattern_counts = np.array([count for count in counts.values()])
+
+            prob_model_maker = make_GTRxGTR_prob_model
 
         case "UNPHASED_DNA":
             patterns = np.array([pattern for pattern in counts.keys()])
@@ -385,18 +396,11 @@ def main_cli():
 
             prob_model_maker = make_unphased_GTRsq_prob_model
 
-            def log_pis_modification(log_pis):
-                pis = np.exp(log_pis)
-                return np.log(U @ perm @ np.kron(pis, pis))
-
         case "CELLPHY":
             patterns = np.array([pattern for pattern in counts.keys()])
             pattern_counts = np.array([count for count in counts.values()])
 
             prob_model_maker = make_cellphy_prob_model
-
-            def log_pis_modification(log_pis):
-                return log_pis
 
         case "GTR10Z":
 
@@ -405,9 +409,6 @@ def main_cli():
 
             prob_model_maker = make_gtr10z_prob_model
 
-            def log_pis_modification(log_pis):
-                return log_pis
-
         case "GTR10":
 
             patterns = np.array([pattern for pattern in counts.keys()])
@@ -415,24 +416,8 @@ def main_cli():
 
             prob_model_maker = make_gtr10_prob_model
 
-            def log_pis_modification(log_pis):
-                return log_pis
-
         case _:
             assert False
-
-    def neg_log_likelihood_prototype(
-        log_pis,
-        model_params,
-        tree_distances,
-        *,
-        prob_model_maker,
-        score_function,
-        log_pis_modification,
-    ):
-        prob_model = prob_model_maker(np.exp(log_pis), model_params, vec=True)
-        prob_matrices = prob_model(tree_distances)
-        return score_function(log_pis_modification(log_pis), prob_matrices)
 
     neg_log_likelihood = functools.partial(
         neg_log_likelihood_prototype,
@@ -442,17 +427,19 @@ def main_cli():
             patterns=patterns,
             pattern_counts=pattern_counts,
             num_states=num_states,
+            taxa_indices=taxa_indices,
+            node_indices=node_indices,
         ),
-        log_pis_modification=log_pis_modification,
     )
 
     ####################################################################################################
     # define optimization objectives for the model parameters and branch lengths
 
     param_objective = functools.partial(
-        param_objective_prototype,
+        rate_param_objective_prototype,
         neg_log_likelihood=neg_log_likelihood,
         rate_constraint=rate_constraint,
+        ploidy=ploidy,
     )
 
     branch_length_objective = functools.partial(
@@ -461,154 +448,296 @@ def main_cli():
     )
 
     full_param_objective = functools.partial(
-        full_param_objective_prototype,
+        param_objective_prototype,
         neg_log_likelihood=neg_log_likelihood,
         rate_constraint=rate_constraint,
-        num_pis=num_pis,
+        num_freq_params=num_freq_params,
+        ploidy=ploidy,
     )
 
+    # alternate a few times between optimizing the rate parameters and the branch lengths.
+    # if requested, also optimize the frequency parameters
     for _ in range(2):
         res = minimize(
             param_objective,
-            s_est,
+            rate_params,
             args=(
-                log_pis_est,
-                tree_distances,
+                log_freq_params,
+                branch_lengths,
             ),
-            method=opt.method,
-            bounds=[(1e-10, np.inf)] * num_params,
-            callback=(
-                (CallbackIR() if opt.method not in {"TNC", "SLSQP", "COBYLA"} else CallbackParam())
-                if opt.log
-                else None
-            ),
-            options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+            method="L-BFGS-B",
+            bounds=[(1e-10, np.inf)] * num_rate_params,
+            callback=CallbackParam() if opt.log else None,
+            options=solver_options["L-BFGS-B"],
         )
         if opt.log:
             print(res)
 
-        s_est = res.x / rate_constraint(np.exp(log_pis_est), res.x)  # fine tune mu
+        # fine tune mu
+        rate_params = rate_param_cleanup(res.x, log_freq_params, ploidy, rate_constraint)
 
         res = minimize(
             branch_length_objective,
-            tree_distances,
-            args=(log_pis_est, s_est),
-            method=opt.method,
+            branch_lengths,
+            args=(log_freq_params, rate_params),
+            method="L-BFGS-B",
             bounds=[(0.0, np.inf)] + [(1e-8, np.inf)] * (2 * len(taxa) - 2),
-            callback=(
-                (CallbackIR() if opt.method not in {"TNC", "SLSQP", "COBYLA"} else CallbackParam())
-                if opt.log
-                else None
-            ),
-            options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+            callback=CallbackParam() if opt.log else None,
+            options=solver_options["L-BFGS-B"],
         )
         if opt.log:
             print(res)
 
         # belt and suspenders for the constraint (avoid -1e-big type bounds violations)
-        tree_distances = np.maximum(0.0, res.x)
+        branch_lengths = np.maximum(0.0, res.x)
 
-        if opt.optimize_freqs:
-            res = minimize(
-                full_param_objective,
-                np.concatenate((log_pis_est, s_est)),
-                args=(tree_distances,),
-                method=opt.method,
-                bounds=([(-np.inf, 0.0)] * num_pis) + ([(1e-10, np.inf)] * num_params),
-                callback=(
-                    (
-                        CallbackIR()
-                        if opt.method not in {"TNC", "SLSQP", "COBYLA"}
-                        else CallbackParam()
+        if freq_params_option == "OPTIMIZE":
+            if model == "UNPHASED_DNA":
+
+                def unphased_full_param_objective(params, branch_lengths):
+                    """
+                    Run the full parameter objective function, but first convert the 4-state frequency parameters to
+                    10 state parameters.
+
+                    :param params: 4-state frequency parameters + rate params
+                    :param branch_lengths:
+                    :return:
+                    """
+                    log_freq_params_4, rate_params = params[:4], params[4:]
+                    with np.errstate(divide="ignore"):
+                        log_freq_params_10 = np.clip(
+                            np.log(
+                                np.clip(pi4s_to_unphased_pi10s(np.exp(log_freq_params_4)), 0.0, 1.0)
+                            ),
+                            -1e100,
+                            0.0,
+                        )
+                        log_freq_params_4 -= logsumexp(log_freq_params_4)
+                    return full_param_objective(
+                        np.concatenate((log_freq_params_10, rate_params)), branch_lengths
                     )
-                    if opt.log
-                    else None
-                ),
-                options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
-            )
-            if opt.log:
-                print(res)
 
-            log_pis_est = np.minimum(0.0, res.x[:num_pis])
-            log_pis_est -= logsumexp(log_pis_est)  # fine tune prob dist
-            pis_est = np.exp(log_pis_est)
+                with np.errstate(divide="ignore"):
+                    log_freq_params_4 = np.clip(
+                        np.log(np.clip(pi10s_to_pi4s(np.exp(log_freq_params)), 0.0, 1.0)),
+                        -1e100,
+                        0.0,
+                    )
+                    log_freq_params_4 -= logsumexp(log_freq_params_4)
+                res = minimize(
+                    unphased_full_param_objective,
+                    np.concatenate((log_freq_params_4, rate_params)),
+                    args=(branch_lengths,),
+                    method="L-BFGS-B",
+                    bounds=([(-np.inf, 0.0)] * 4) + ([(1e-10, np.inf)] * num_rate_params),
+                    callback=CallbackParam() if opt.log else None,
+                    options=solver_options["L-BFGS-B"],
+                )
+                if opt.log:
+                    print(res)
 
-            s_est = np.maximum(0.0, res.x[num_pis:])
-            s_est = s_est / rate_constraint(np.exp(log_pis_est), s_est)  # fine tune mu
+                log_freq_params_4 = np.minimum(0.0, res.x[:4])
+                log_freq_params_4 -= logsumexp(log_freq_params_4)  # fine tune prob dist
+                # convert back to 10 state frequencies
+                freq_params = pi4s_to_unphased_pi10s(np.exp(log_freq_params_4))
+                freq_params /= np.sum(freq_params)
+                with np.errstate(divide="ignore"):
+                    log_freq_params = np.clip(
+                        np.log(freq_params),
+                        -1e100,
+                        0.0,
+                    )
+
+                # fine tune mu
+                rate_params = rate_param_cleanup(
+                    res.x[4:], log_freq_params, ploidy, rate_constraint
+                )
+
+            else:
+                res = minimize(
+                    full_param_objective,
+                    np.concatenate((log_freq_params, rate_params)),
+                    args=(branch_lengths,),
+                    method="L-BFGS-B",
+                    bounds=([(-np.inf, 0.0)] * num_freq_params)
+                    + ([(1e-10, np.inf)] * num_rate_params),
+                    callback=CallbackParam() if opt.log else None,
+                    options=solver_options["L-BFGS-B"],
+                )
+                if opt.log:
+                    print(res)
+
+                log_freq_params = np.minimum(0.0, res.x[:num_freq_params])
+                log_freq_params -= logsumexp(log_freq_params)  # fine tune prob dist
+                freq_params = np.exp(log_freq_params)
+
+                # fine tune mu
+                rate_params = rate_param_cleanup(
+                    res.x[num_freq_params:], log_freq_params, ploidy, rate_constraint
+                )
 
     ####################################################################################################
+    # Full joint (params + branch lengths) optimization
 
-    if opt.optimize_freqs:
+    if freq_params_option == "OPTIMIZE":
 
         from pruning.objective_functions import full_objective_prototype
 
         full_objective = functools.partial(
             full_objective_prototype,
-            num_pis=num_pis,
-            num_params=num_params,
+            num_freq_params=num_freq_params,
+            num_rate_params=num_rate_params,
             neg_log_likelihood=neg_log_likelihood,
             rate_constraint=rate_constraint,
+            ploidy=ploidy,
         )
 
-        res = minimize(
-            full_objective,
-            np.concatenate((log_pis_est, s_est, tree_distances)),
-            method=opt.method,
-            bounds=([(-np.inf, 0.0)] * num_pis)
-            + [(0.0, np.inf)] * (num_params + 2 * len(taxa) - 1),
-            callback=(
-                (CallbackIR() if opt.method not in {"TNC", "SLSQP", "COBYLA"} else CallbackParam())
-                if opt.log
-                else None
-            ),
-            options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
-        )
-        if opt.log:
-            print(res)
+        if model == "UNPHASED_DNA":
+            # in the unphased dna model, the 10 state frequency parameters are dependant on the 4-state parameters
+            # so we have to handle this one separately
 
-        log_pis_est = np.minimum(0.0, res.x[:num_pis])
-        log_pis_est -= logsumexp(log_pis_est)  # fine tune prob dist
-        pis_est = np.exp(log_pis_est)
+            def unphased_full_objective(params):
+                """
+                Run the full objective function, but first convert the 4-state frequency parameters to 10 state
+                parameters.
 
-        s_est = np.maximum(0.0, res.x[num_pis : num_pis + num_params])
-        s_est = s_est / rate_constraint(np.exp(log_pis_est), s_est)  # fine tune mu
+                :param params: 4-state frequency parameters + rate params + branch lengths
+                :return:
+                """
+                log_freq_params_4, other_params = params[:4], params[4:]
+                with np.errstate(divide="ignore"):
+                    log_freq_params_10 = np.clip(
+                        np.log(
+                            np.clip(pi4s_to_unphased_pi10s(np.exp(log_freq_params_4)), 0.0, 1.0)
+                        ),
+                        -1e100,
+                        0.0,
+                    )
+                    log_freq_params_4 -= logsumexp(log_freq_params_4)
+                return full_objective(np.concatenate((log_freq_params_10, other_params)))
 
-        tree_distances = np.maximum(0.0, res.x[num_pis + num_params :])
+            with np.errstate(divide="ignore"):
+                log_freq_params_4 = np.clip(
+                    np.log(np.clip(pi10s_to_pi4s(np.exp(log_freq_params)), 0.0, 1.0)),
+                    -1e100,
+                    0.0,
+                )
+                log_freq_params_4 -= logsumexp(log_freq_params_4)
+            res = minimize(
+                unphased_full_objective,
+                np.concatenate((log_freq_params_4, rate_params, branch_lengths)),
+                method="L-BFGS-B",
+                bounds=([(-np.inf, 0.0)] * 4)
+                + [(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
+                callback=CallbackParam() if opt.log else None,
+                options=solver_options["L-BFGS-B"],
+            )
+            if opt.log:
+                print(res)
+
+            log_freq_params_4 = np.minimum(0.0, res.x[:4])
+            log_freq_params_4 -= logsumexp(log_freq_params_4)  # fine tune prob dist
+            # convert back to 10 state frequencies
+            freq_params = pi4s_to_unphased_pi10s(np.exp(log_freq_params_4))
+            freq_params /= np.sum(freq_params)
+            with np.errstate(divide="ignore"):
+                log_freq_params = np.clip(
+                    np.log(freq_params),
+                    -1e100,
+                    0.0,
+                )
+
+            # fine tune mu
+            rate_params = rate_param_cleanup(
+                res.x[4 : 4 + num_rate_params],
+                log_freq_params,
+                ploidy,
+                rate_constraint,
+            )
+
+            branch_lengths = np.maximum(0.0, res.x[4 + num_rate_params :])
+        else:
+            # optimize the freq+rates+branch lengths
+
+            res = minimize(
+                full_objective,
+                np.concatenate((log_freq_params, rate_params, branch_lengths)),
+                method="L-BFGS-B",
+                bounds=([(-np.inf, 0.0)] * num_freq_params)
+                + [(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
+                callback=CallbackParam() if opt.log else None,
+                options=solver_options["L-BFGS-B"],
+            )
+            if opt.log:
+                print(res)
+
+            log_freq_params = np.minimum(0.0, res.x[:num_freq_params])
+            log_freq_params -= logsumexp(log_freq_params)  # fine tune prob dist
+            freq_params = np.exp(log_freq_params)
+
+            # fine tune mu
+            rate_params = rate_param_cleanup(
+                res.x[num_freq_params : num_freq_params + num_rate_params],
+                log_freq_params,
+                ploidy,
+                rate_constraint,
+            )
+
+            branch_lengths = np.maximum(0.0, res.x[num_freq_params + num_rate_params :])
 
     else:
         # optimize everything but the state frequencies
         params_distances_objective = functools.partial(
-            params_distances_objective_prototype,
-            num_params=num_params,
+            rates_distances_objective_prototype,
+            num_rate_params=num_rate_params,
             neg_log_likelihood=neg_log_likelihood,
             rate_constraint=rate_constraint,
+            ploidy=ploidy,
         )
 
         res = minimize(
             params_distances_objective,
-            np.concatenate((s_est, tree_distances)),
-            args=(log_pis_est,),
-            method=opt.method,
-            bounds=[(0.0, np.inf)] * (num_params + 2 * len(taxa) - 1),
-            callback=(
-                (CallbackIR() if opt.method not in {"TNC", "SLSQP", "COBYLA"} else CallbackParam())
-                if opt.log
-                else None
-            ),
-            options={"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10},
+            np.concatenate((rate_params, branch_lengths)),
+            args=(log_freq_params,),
+            method="L-BFGS-B",
+            bounds=[(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
+            callback=CallbackParam() if opt.log else None,
+            options=solver_options["L-BFGS-B"],
         )
         if opt.log:
             print(res)
 
-        s_est = np.maximum(0.0, res.x[:num_params])
-        s_est = s_est / rate_constraint(np.exp(log_pis_est), s_est)  # fine tune mu
-        tree_distances = np.maximum(0.0, res.x[num_params:])
+        # fine tune mu
+        rate_params = rate_param_cleanup(
+            res.x[:num_rate_params], log_freq_params, ploidy, rate_constraint
+        )
+
+        branch_lengths = np.maximum(0.0, res.x[num_rate_params:])
+
+        res = minimize(
+            params_distances_objective,
+            np.concatenate((rate_params, branch_lengths)),
+            args=(log_freq_params,),
+            method="Powell",
+            bounds=[(0.0, np.inf)] * (num_rate_params + 2 * len(taxa) - 1),
+            callback=CallbackParam() if opt.log else None,
+            options=solver_options["Powell"],
+        )
+        if opt.log:
+            print(res)
+
+        # fine tune mu
+        rate_params = rate_param_cleanup(
+            res.x[:num_rate_params], log_freq_params, ploidy, rate_constraint
+        )
+
+        branch_lengths = np.maximum(0.0, res.x[num_rate_params:])
 
     ################################################################################
     # update branch lens in ETE3 tree
 
     for idx, node in enumerate(true_tree.traverse()):
-        node.dist = tree_distances[idx]
+        node.dist = branch_lengths[idx]
 
     ################################################################################
     # write tree and statistics to stdout or a file, depending up command line opts
@@ -623,10 +752,10 @@ def main_cli():
         with open(opt.output + ".log", "w") as file:
             with redirect_stdout(file):
                 print_stats(
-                    s_est=s_est,
-                    pis_est=pis_est,
+                    rate_params=rate_params,
+                    freq_params=freq_params,
                     neg_l=res.fun,
-                    tree_distances=tree_distances,
+                    tree_distances=branch_lengths,
                     true_branch_lens=true_branch_lens,
                     model=model,
                 )
@@ -635,10 +764,10 @@ def main_cli():
         print(newick_rep)
         print()
         print_stats(
-            s_est=s_est,
-            pis_est=pis_est,
+            rate_params=rate_params,
+            freq_params=freq_params,
             neg_l=res.fun,
-            tree_distances=tree_distances,
+            tree_distances=branch_lengths,
             true_branch_lens=true_branch_lens,
             model=model,
         )
@@ -666,10 +795,15 @@ def compute_initial_tree_distance_estimates(
             from pruning.distance_functions import dna_sequence_distance
 
             sequence_distance = functools.partial(dna_sequence_distance, pis=pis)
-        case "PHASED_DNA":
+        case "PHASED_DNA4":
             from pruning.distance_functions import phased_sequence_distance
 
             sequence_distance = functools.partial(phased_sequence_distance, pis=pis)
+        case "PHASED_DNA16" | "PHASED_DNA16_MP":
+            from pruning.distance_functions import phased_sequence_distance
+
+            sequence_distance = functools.partial(phased_sequence_distance, pis=pis)
+
         case "UNPHASED_DNA" | "CELLPHY" | "CELLPHY_PI" | "GTR10Z" | "GTR10":
             # TODO: the others (cellphy, etc.) are included here as they are 10 state, not because this is a natural
             #  distance under their model
@@ -724,10 +858,10 @@ def compute_initial_tree_distance_estimates(
     return tree_distances
 
 
-def read_sequences(ambig_char, model, opt):
+def read_sequences(ambig_char, model, sequence_file):
     import numpy as np
 
-    from pruning.matrices import U, perm
+    from pruning.matrices import U, V, perm
 
     nuc_to_idx = {"A": 0, "C": 1, "G": 2, "T": 3, ambig_char: 4}
     unphased_nuc_to_idx = {
@@ -761,7 +895,7 @@ def read_sequences(ambig_char, model, opt):
     phased_joint_freq_counts = None
     unphased_joint_freq_counts = None
     # read and process the sequence file
-    with open(opt.seqs, "r") as seq_file:
+    with open(sequence_file, "r") as seq_file:
         # first line consists of counts
         ntaxa, nsites = map(int, next(seq_file).split())
 
@@ -785,7 +919,7 @@ def read_sequences(ambig_char, model, opt):
                     assert taxon not in sequences
                     sequences[taxon] = seq
                 assert ntaxa == len(sequences)
-            case "PHASED_DNA":
+            case "PHASED_DNA4":
                 num_states = 4
                 phased_joint_freq_counts = np.zeros(16, dtype=np.int64)
                 # parse sequences
@@ -834,6 +968,56 @@ def read_sequences(ambig_char, model, opt):
                     assert taxon not in sequences
                     sequences[taxon] = seq
                 assert ntaxa == len(sequences)
+            case "PHASED_DNA16" | "PHASED_DNA16_MP":
+                num_states = 16
+                phased_joint_freq_counts = np.zeros(16, dtype=np.int64)
+                # parse sequences
+                sequences = dict()
+                for line in seq_file:
+                    taxon, *seq = line.strip().split()
+                    seq = list(map(lambda s: s.upper(), seq))
+                    assert all(len(s) == 2 for s in seq)
+                    # compute nucleotide frequency
+                    for nuc_pair in seq:
+                        if nuc_pair[0] == ambig_char:
+                            if nuc_pair[1] == ambig_char:
+                                for idx in range(16):
+                                    phased_joint_freq_counts[idx] += 1 / 16
+                            else:
+                                for idx in range(4):
+                                    phased_joint_freq_counts[4 * idx + nuc_to_idx[nuc_pair[1]]] += (
+                                        1 / 4
+                                    )
+                        else:
+                            if nuc_pair[1] == ambig_char:
+                                for idx in range(4):
+                                    phased_joint_freq_counts[4 * nuc_to_idx[nuc_pair[0]] + idx] += (
+                                        1 / 4
+                                    )
+                            else:
+                                phased_joint_freq_counts[
+                                    4 * nuc_to_idx[nuc_pair[0]] + nuc_to_idx[nuc_pair[1]]
+                                ] += 1
+
+                        for nuc in nuc_pair:
+                            if nuc != ambig_char:
+                                base_freq_counts[nuc_to_idx[nuc]] += 1
+                            else:
+                                for idx in range(4):
+                                    base_freq_counts[idx] += 0.25
+                    # sequence coding is lexicographic AA, AC, AG, AT, A?, CA, ...
+                    # which is equivalent to a base-5 encoding 00=0, 01=1, 02=2, 03=3, 04=4, 10=5, ...
+                    seq = np.array(
+                        [
+                            nuc_to_idx[nuc[0]] * 5 + nuc_to_idx[nuc[1]]
+                            for nuc in map(lambda s: s.upper(), seq)
+                        ],
+                        dtype=np.uint8,
+                    )
+                    assert taxon not in sequences
+                    sequences[taxon] = seq
+                assert ntaxa == len(sequences)
+
             case "UNPHASED_DNA" | "CELLPHY" | "GTR10Z" | "GTR10":
                 num_states = 10
                 unphased_joint_freq_counts = np.zeros(10, dtype=np.int64)
@@ -900,13 +1084,20 @@ def read_sequences(ambig_char, model, opt):
                 assert False, "Unknown model selection"
     # aggregate the base frequencies
     pis = base_freq_counts / np.sum(base_freq_counts)
-    if phased_joint_freq_counts is None:
-        pis16 = np.kron(pis, pis)
-    else:
+    if phased_joint_freq_counts is not None:
         pis16 = phased_joint_freq_counts / np.sum(phased_joint_freq_counts)
-    if unphased_joint_freq_counts is None:
-        pis10 = U @ perm @ pis16
+        if unphased_joint_freq_counts is not None:
+            pis10 = unphased_joint_freq_counts / np.sum(unphased_joint_freq_counts)
+        else:
+            pis10 = pis16 @ perm @ V
     else:
-        pis10 = unphased_joint_freq_counts / np.sum(unphased_joint_freq_counts)
+        if unphased_joint_freq_counts is not None:
+            pis10 = unphased_joint_freq_counts / np.sum(unphased_joint_freq_counts)
+            # pis10 @ U = pis16 @ perm @ V @ U ~= pis16 @ perm
+            # pis10 @ U @ perm.T ~= pis16 @ perm @ perm.T  = pis16
+            pis16 = pis10 @ U @ perm.T
+        else:
+            pis16 = np.kron(pis, pis)
+            pis10 = pis16 @ perm @ V
 
-    return nsites, num_states, pis, pis10, sequences
+    return nsites, num_states, pis, pis10, pis16, sequences

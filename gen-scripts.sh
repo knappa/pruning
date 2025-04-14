@@ -76,10 +76,10 @@ ADO=0.00
 for NSITES in 1000 10000
 do
   seq -w 0 99 | parallel --line-buffer --jobs 15 -I {} \
-    ~/pruning/pruningv3.py \
-      --seqs diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/diploid-0{}.phy \
-      --tree diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/tree-0{}.nwk \
-      --output diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-phased-0{} \
+    pruning \
+      --seqs data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/diploid-0{}.phy \
+      --tree data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/tree-0{}.nwk \
+      --output data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-phased-0{} \
       --model PHASED_DNA \
       --method L-BFGS-B \
       --log

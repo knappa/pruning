@@ -3,14 +3,14 @@ args <- commandArgs(trailingOnly = TRUE)
 print(args)
 
 directory <- args[1]
-count <- args[2]
+count <- strtoi(args[2])
 
 library(ape)
 library(TreeDist)
 library(stringr)
 library(phangorn)
 
-models <- c("phased", "unphased", "cellphy", "cellphy-pi", "gtr10z", "gtr10")
+models <- c("phased4", "phased16", "phased16mp", "unphased", "cellphy", "cellphy-pi", "gtr10z", "gtr10")
 
 df <- data.frame(matrix(
   ncol = 10,
@@ -64,4 +64,8 @@ for (model.idx in seq_along(models)) {
   }
 }
 
-write.csv(df, "output.csv", row.names = FALSE)
+write.csv(df, paste(
+  directory,
+  "/tree-stats-output.csv",
+  sep = ""
+), row.names = FALSE)
