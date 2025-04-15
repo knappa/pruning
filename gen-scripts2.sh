@@ -120,3 +120,26 @@ do
       --method L-BFGS-B \
       --log
 done
+
+
+
+
+SEQ_ERR=0.00
+ADO=0.00
+for NSITES in 1000 10000
+do
+  seq -w 0 99 | parallel --line-buffer --jobs 15 -I {} \
+    pruning_stack \
+      --seqs ~/pruning/data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/diploid-0{}.phy \
+      --tree ~/pruning/data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/tree-0{}.nwk \
+      --output ~/pruning/data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-0{} \
+      --log
+done
+
+
+seq -w 0 99 | parallel --line-buffer --jobs 15 -I {} \
+  pruning_stack \
+    --seqs ~/pruning/data/juiced-diploid-10K/diploid-0{}.phy \
+    --tree ~/pruning/data/juiced-diploid-10K/tree-0{}.nwk \
+    --output ~/pruning/data/juiced-diploid-10K/reconstructed-tree-0{} \
+    --log

@@ -44,34 +44,34 @@ def main_cli():
     )
 
     ################################################################################
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        "--optimize_freq_params",
-        action="store_true",
-        help="optimize frequency parameters using maximum likelihood",
-    )
-    group.add_argument(
-        "--freq_params_from_seq",
-        action="store_true",
-        help="Estimate root distribution from sequence data (default)",
-    )
-    group.add_argument(
-        "--fix_freq_params",
-        nargs=16,
-        # fmt: off
-        # @formatter:off
-        metavar=(
-            "pi_aa", "pi_ac", "pi_ag", "pi_at",
-            "pi_ca", "pi_cc", "pi_cg", "pi_ct",
-            "pi_ga", "pi_gc", "pi_gg", "pi_gt",
-            "pi_ta", "pi_tc", "pi_tg", "pi_tt",
-        ),
-        # @formatter:on
-        # fmt: on
-        help="",
-        type=float,
-        default=None,
-    )
+    # group = parser.add_mutually_exclusive_group()
+    # group.add_argument(
+    #     "--optimize_freq_params",
+    #     action="store_true",
+    #     help="optimize frequency parameters using maximum likelihood",
+    # )
+    # group.add_argument(
+    #     "--freq_params_from_seq",
+    #     action="store_true",
+    #     help="Estimate root distribution from sequence data (default)",
+    # )
+    # group.add_argument(
+    #     "--fix_freq_params",
+    #     nargs=16,
+    #     # fmt: off
+    #     # @formatter:off
+    #     metavar=(
+    #         "pi_aa", "pi_ac", "pi_ag", "pi_at",
+    #         "pi_ca", "pi_cc", "pi_cg", "pi_ct",
+    #         "pi_ga", "pi_gc", "pi_gg", "pi_gt",
+    #         "pi_ta", "pi_tc", "pi_tg", "pi_tt",
+    #     ),
+    #     # @formatter:on
+    #     # fmt: on
+    #     help="",
+    #     type=float,
+    #     default=None,
+    # )
     ################################################################################
 
     parser.add_argument("--ambig", type=str, default="?", help="ambiguity character")
@@ -92,7 +92,11 @@ def main_cli():
     if (
         not opt.overwrite
         and opt.output is not None
-        and (os.path.isfile(opt.output + ".nwk") or os.path.isfile(opt.output + ".log"))
+        and (
+            os.path.isfile(opt.output + ".nwk")
+            or os.path.isfile(opt.output + ".log")
+            or os.path.isfile(opt.output + ".csv")
+        )
     ):
         print("output files from previous run present, exiting.")
         exit()
@@ -105,18 +109,18 @@ def main_cli():
         print(f"Ambiguity character as '{ambig_char}' is not supported")
         exit(-1)
 
-    freq_params = None
-    if opt.optimize_freq_params:
-        freq_params_option = "OPTIMIZE"
-        raise NotImplementedError()
-    elif opt.freq_params_from_seq:
-        freq_params_option = "FROM_SEQ"
-    elif opt.fix_freq_params:
-        freq_params_option = "FIX"
-        freq_params = np.array(opt.fix_freq_params)
-        raise NotImplementedError()
-    else:
-        freq_params_option = "FROM_SEQ"
+    # freq_params = None
+    # if opt.optimize_freq_params:
+    #     freq_params_option = "OPTIMIZE"
+    #     raise NotImplementedError()
+    # elif opt.freq_params_from_seq:
+    #     freq_params_option = "FROM_SEQ"
+    # elif opt.fix_freq_params:
+    #     freq_params_option = "FIX"
+    #     freq_params = np.array(opt.fix_freq_params)
+    #     raise NotImplementedError()
+    # else:
+    #     freq_params_option = "FROM_SEQ"
 
     ################################################################################
     # read the true tree
@@ -238,9 +242,9 @@ def main_cli():
 
     rate_params_4state, branch_lengths_4state, nll_4state = fit_model(
         neg_log_likelihood=neg_log_likelihood_4state,
-        branch_lengths=branch_lengths_init,
+        branch_lengths_initial=branch_lengths_init,
+        rate_params_initial=rate_params_4state,
         log_freq_params=log_freq_params_4state,
-        rate_params=rate_params_4state,
         rate_constraint=gtr4_rate,
         ploidy=1,
     )
@@ -286,9 +290,9 @@ def main_cli():
 
     rate_params_unphased, branch_lengths_unphased, nll_unphased = fit_model(
         neg_log_likelihood=neg_log_likelihood_unphased,
-        branch_lengths=branch_lengths_4state,
+        branch_lengths_initial=branch_lengths_4state,
+        rate_params_initial=rate_params_unphased,
         log_freq_params=log_freq_params_unphased,
-        rate_params=rate_params_unphased,
         rate_constraint=unphased_rate,
         ploidy=2,
     )
@@ -334,9 +338,9 @@ def main_cli():
 
     rate_params_cellphy, branch_lengths_cellphy, nll_cellphy = fit_model(
         neg_log_likelihood=neg_log_likelihood_cellphy,
-        branch_lengths=branch_lengths_4state,
+        branch_lengths_initial=branch_lengths_4state,
+        rate_params_initial=rate_params_cellphy,
         log_freq_params=log_freq_params_cellphy,
-        rate_params=rate_params_cellphy,
         rate_constraint=cellphy10_rate,
         ploidy=2,
     )
@@ -414,9 +418,9 @@ def main_cli():
 
     rate_params_gtr10z, branch_lengths_gtr10z, nll_gtr10z = fit_model(
         neg_log_likelihood=neg_log_likelihood_gtr10z,
-        branch_lengths=branch_lengths_unphased,
+        branch_lengths_initial=branch_lengths_unphased,
+        rate_params_initial=rate_params_gtr10z,
         log_freq_params=log_freq_params_gtr10z,
-        rate_params=rate_params_gtr10z,
         rate_constraint=gtr10z_rate,
         ploidy=2,
     )
@@ -513,9 +517,9 @@ def main_cli():
 
     rate_params_gtr10, branch_lengths_gtr10, nll_gtr10 = fit_model(
         neg_log_likelihood=neg_log_likelihood_gtr10,
-        branch_lengths=branch_lengths_gtr10z,
+        branch_lengths_initial=branch_lengths_gtr10z,
+        rate_params_initial=rate_params_gtr10,
         log_freq_params=log_freq_params_gtr10,
-        rate_params=rate_params_gtr10,
         rate_constraint=gtr10_rate,
         ploidy=2,
     )
@@ -561,9 +565,9 @@ def main_cli():
 
     rate_params_16state, branch_lengths_16state, nll_16state = fit_model(
         neg_log_likelihood=neg_log_likelihood_16state,
-        branch_lengths=branch_lengths_4state,
+        branch_lengths_initial=branch_lengths_4state,
+        rate_params_initial=rate_params_16state,
         log_freq_params=log_freq_params_16state,
-        rate_params=rate_params_16state,
         rate_constraint=phased_rate,
         ploidy=2,
     )
@@ -609,9 +613,9 @@ def main_cli():
 
     rate_params_16state_mp, branch_lengths_16state_mp, nll_16state_mp = fit_model(
         neg_log_likelihood=neg_log_likelihood_16state_mp,
-        branch_lengths=branch_lengths_16state,
+        branch_lengths_initial=branch_lengths_16state,
+        rate_params_initial=rate_params_16state_mp,
         log_freq_params=log_freq_params_16state_mp,
-        rate_params=rate_params_16state_mp,
         rate_constraint=phased_mp_rate,
         ploidy=2,
     )
@@ -680,11 +684,6 @@ def main_cli():
             nll_16state_mp,
         )
 
-    # if hasattr(opt, "output") and opt.output is not None:
-    #     with open(opt.output + "-16state_mp.nwk", "w") as file:
-    #         file.write(newick_rep)
-    #         file.write("\n")
-
     ################################################################################
     ################################################################################
     ################################################################################
@@ -692,9 +691,9 @@ def main_cli():
 
 def fit_model(
     *,
-    branch_lengths,
+    branch_lengths_initial,
+    rate_params_initial,
     log_freq_params,
-    rate_params,
     neg_log_likelihood,
     rate_constraint,
     ploidy,
@@ -712,8 +711,8 @@ def fit_model(
     )
     from pruning.util import CallbackParam, rate_param_cleanup, solver_options
 
-    num_rate_params = len(rate_params)
-    num_branch_lens = len(branch_lengths)
+    num_rate_params = len(rate_params_initial)
+    num_branch_lens = len(branch_lengths_initial)
 
     param_objective = functools.partial(
         rate_param_objective_prototype,
@@ -731,10 +730,10 @@ def fit_model(
 
         res = minimize(
             param_objective,
-            rate_params,
+            rate_params_initial,
             args=(
                 log_freq_params,
-                branch_lengths,
+                branch_lengths_initial,
             ),
             method="L-BFGS-B",
             bounds=[(1e-10, np.inf)] * num_rate_params,
@@ -745,7 +744,7 @@ def fit_model(
             print(res)
 
         # fine tune mu
-        rate_params = rate_param_cleanup(
+        rate_params_initial = rate_param_cleanup(
             x=res.x,
             log_freq_params=log_freq_params,
             ploidy=ploidy,
@@ -754,8 +753,8 @@ def fit_model(
 
         res = minimize(
             branch_length_objective,
-            branch_lengths,
-            args=(log_freq_params, rate_params),
+            branch_lengths_initial,
+            args=(log_freq_params, rate_params_initial),
             method="L-BFGS-B",
             bounds=[(0.0, np.inf)] + [(1e-8, np.inf)] * (num_branch_lens - 1),
             callback=CallbackParam() if log else None,
@@ -765,7 +764,7 @@ def fit_model(
             print(res)
 
         # belt and suspenders for the constraint (avoid -1e-big type bounds violations)
-        branch_lengths = np.maximum(0.0, res.x)
+        branch_lengths_initial = np.maximum(0.0, res.x)
 
     # Joint (params + branch lengths) optimization
     # optimize everything but the state frequencies
@@ -778,7 +777,7 @@ def fit_model(
     )
     res = minimize(
         params_distances_objective,
-        np.concatenate((rate_params, branch_lengths)),
+        np.concatenate((rate_params_initial, branch_lengths_initial)),
         args=(log_freq_params,),
         method="L-BFGS-B",
         bounds=[(0.0, np.inf)] * (num_rate_params + num_branch_lens),
@@ -789,18 +788,18 @@ def fit_model(
         print(res)
 
     # fine tune mu
-    rate_params = rate_param_cleanup(
+    rate_params_initial = rate_param_cleanup(
         x=res.x[:num_rate_params],
         log_freq_params=log_freq_params,
         ploidy=1,
         rate_constraint=rate_constraint,
     )
 
-    branch_lengths = np.maximum(0.0, res.x[num_rate_params:])
+    branch_lengths_initial = np.maximum(0.0, res.x[num_rate_params:])
 
     res = minimize(
         params_distances_objective,
-        np.concatenate((rate_params, branch_lengths)),
+        np.concatenate((rate_params_initial, branch_lengths_initial)),
         args=(log_freq_params,),
         method="Powell",
         bounds=[(0.0, np.inf)] * (num_rate_params + num_branch_lens),
@@ -811,16 +810,16 @@ def fit_model(
         print(res)
 
     # fine tune mu
-    rate_params = rate_param_cleanup(
+    rate_params_initial = rate_param_cleanup(
         x=res.x[:num_rate_params],
         log_freq_params=log_freq_params,
         ploidy=ploidy,
         rate_constraint=rate_constraint,
     )
 
-    branch_lengths = np.maximum(0.0, res.x[num_rate_params:])
+    branch_lengths_initial = np.maximum(0.0, res.x[num_rate_params:])
 
-    return rate_params, branch_lengths, res.fun
+    return rate_params_initial, branch_lengths_initial, res.fun
 
 
 def compute_initial_tree_distance_estimates(
@@ -1037,4 +1036,4 @@ def print_states(
         **{"16state_mp pi_" + str(i): s for i, s in enumerate(freq_params_16state_mp)},
     }
     print(",".join(data.keys()))
-    print(",".join(data.values()))
+    print(",".join(map(str, data.values())), flush=True)
