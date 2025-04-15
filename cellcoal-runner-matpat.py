@@ -44,6 +44,12 @@ parser.add_argument(
     help="base freqs ACGT",
 )
 parser.add_argument(
+    "--skewed_joint_seq",
+    type=float,
+    default=0.0,
+    help="proportion of maternal/paternal sites that are forced matches (in addition to coincidental matches)",
+)
+parser.add_argument(
     "--mut_matrix",
     type=float,
     nargs=16,
@@ -159,7 +165,8 @@ AMPLIFICATION_ERROR = [
 #
 
 
-DELETE_VCF_FILES = opt.delete_vcf if hasattr(opt,'delete_vcf') else False
+DELETE_VCF_FILES = opt.delete_vcf if hasattr(opt, "delete_vcf") else False
+
 
 # reference for cell coal command line parameters:
 # https://dapogon.github.io/cellcoal/cellcoal.manual.v1.1.html#67_parameter_file_name_at_the_command_line
@@ -351,6 +358,28 @@ def generate_matpat():
     return mat_genome, pat_genome
 
 
+def generate_skewed_matpat(match_prop: float = 0.5):
+    """
+    Generate a maternal and paternal genotype
+    :return:
+    """
+    translation = {0: "A", 1: "C", 2: "G", 3: "T"}
+    cdf = np.cumsum(NUC_BASE_FREQ)
+    cdf[-1] = 1.0  # careful
+    mat_genome = ""
+    pat_genome = ""
+    for _ in range(NUM_SITES):
+        if np.random.rand() < match_prop:
+            nuc = translation[int(np.argmax(np.random.random() < cdf))]
+            mat_genome += nuc
+            pat_genome += nuc
+        else:
+            mat_genome += translation[int(np.argmax(np.random.random() < cdf))]
+            pat_genome += translation[int(np.argmax(np.random.random() < cdf))]
+
+    return mat_genome, pat_genome
+
+
 nexus_template = """#NEXUS
 
 BEGIN DATA;
@@ -378,7 +407,10 @@ for biopsy_number in range(NUM_SAMPLES):
     newick_filename = f"{os.getcwd()}/{FILENAME_PREFIX}.nwk"
 
     # create the ancestral genome
-    mat_genome, pat_genome = generate_matpat()
+    if opt.skewed_joint_seq > 0.0:
+        mat_genome, pat_genome = generate_skewed_matpat(opt.skewed_joint_seq)
+    else:
+        mat_genome, pat_genome = generate_matpat()
     fasta_filename = f"{os.getcwd()}/{FILENAME_PREFIX}-ancestral.fasta"
     with open(fasta_filename, "w") as file:
         file.write(fasta_template.format(mat_genome=mat_genome, pat_genome=pat_genome))

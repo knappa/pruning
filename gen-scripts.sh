@@ -69,6 +69,30 @@ done
 # 2.1 3.7 0.0 1.4 \
 # 0.8 2.4 0.9 0.0
 
+~/pruning/cellcoal-runner-matpat.py \
+  --cellcoal ~/pruning/cellcoal-modified/bin/cellcoal-1.3.0 \
+  --skewed_joint_seq 0.5 \
+  --ncells 100 \
+  --nsamples 100 \
+  --nsites 10000 \
+  --eff_pop 100000 \
+  --birth_rate 3.0 \
+  --death_rate 0.4 \
+  --ado 0.0 \
+  --amp_err_mean 0 \
+  --amp_err_var 0 \
+  --seq_err 0.0 \
+  --somatic_mut_rate 1e-4 \
+  --doublet_rate_mean 0.0 \
+  --base_freqs 0.293 0.2 0.207 0.3 \
+  --mut_matrix \
+  0.000 0.839 0.112 2.239 \
+  0.839 0.000 0.600 3.119 \
+  0.112 0.600 0.000 0.560 \
+  2.239 3.119 0.560 0.000;
+
+
+
 #for NSITES in 1000 10000 100000
 
 SEQ_ERR=0.00
