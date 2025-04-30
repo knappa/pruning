@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys
 
 filename = sys.argv[1]
@@ -7,7 +9,7 @@ if filename is None:
 
 print(filename)
 
-with open(filename, "r") as file, open(filename + ".converted", "w") as outfile:
+with open(filename, "r") as file, open(filename + ".haploid", "w") as outfile:
     num_cells, num_sites = next(file).split()
 
     # print(f"{num_cells} {num_sites}")
@@ -16,6 +18,9 @@ with open(filename, "r") as file, open(filename + ".converted", "w") as outfile:
     for line in file:
 
         cell_name, *sequence = line.split()
+
+        if cell_name in {"ingrroot", "outgroot", "outgcell"}:
+            continue
 
         converted_sequence = []
         for bp in sequence:

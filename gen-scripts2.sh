@@ -143,3 +143,18 @@ seq -w 0 99 | parallel --line-buffer --jobs 15 -I {} \
     --tree ~/pruning/data/juiced-diploid-10K/tree-0{}.nwk \
     --output ~/pruning/data/juiced-diploid-10K/reconstructed-tree-0{} \
     --log
+
+
+
+SEQ_ERR=0.00
+ADO=0.00
+for NSITES in 1000 10000
+do
+  seq -w 0 99 | parallel --line-buffer --jobs 5 -I {} \
+    pruning_stack \
+      --ploidy 1 \
+      --seqs ~/pruning/data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/diploid-0{}.phy \
+      --tree ~/pruning/data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/tree-0{}.nwk \
+      --output ~/pruning/data/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-p1-0{} \
+      --log
+done

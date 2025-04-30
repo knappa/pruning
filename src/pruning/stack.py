@@ -74,6 +74,10 @@ def main_cli():
     # )
     ################################################################################
 
+    parser.add_argument(
+        "--ploidy", type=int, default=-1, help="force the ploidy to a specific value"
+    )
+
     parser.add_argument("--ambig", type=str, default="?", help="ambiguity character")
     parser.add_argument("--output", type=str, help="output filename prefix for tree")
     parser.add_argument("--overwrite", action="store_true", help="overwrite outputs, if they exist")
@@ -108,6 +112,8 @@ def main_cli():
     if ambig_char in ["A", "C", "G", "T"]:
         print(f"Ambiguity character as '{ambig_char}' is not supported")
         exit(-1)
+
+    force_ploidy: int = opt.ploidy
 
     # freq_params = None
     # if opt.optimize_freq_params:
@@ -224,7 +230,10 @@ def main_cli():
         log_freq_params_4state = np.clip(np.log(freq_params_4state), -1e100, 0.0)
 
     rate_params_4state = rate_param_cleanup(
-        x=np.ones(6), log_freq_params=log_freq_params_4state, ploidy=1, rate_constraint=gtr4_rate
+        x=np.ones(6),
+        log_freq_params=log_freq_params_4state,
+        ploidy=1 if force_ploidy == -1 else force_ploidy,
+        rate_constraint=gtr4_rate,
     )
 
     neg_log_likelihood_4state = functools.partial(
@@ -246,7 +255,7 @@ def main_cli():
         rate_params_initial=rate_params_4state,
         log_freq_params=log_freq_params_4state,
         rate_constraint=gtr4_rate,
-        ploidy=1,
+        ploidy=1 if force_ploidy == -1 else force_ploidy,
     )
 
     # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
@@ -271,7 +280,7 @@ def main_cli():
     rate_params_unphased = rate_param_cleanup(
         x=rate_params_4state,
         log_freq_params=log_freq_params_unphased,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
         rate_constraint=unphased_rate,
     )
 
@@ -294,7 +303,7 @@ def main_cli():
         rate_params_initial=rate_params_unphased,
         log_freq_params=log_freq_params_unphased,
         rate_constraint=unphased_rate,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
     )
 
     # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
@@ -319,7 +328,7 @@ def main_cli():
     rate_params_cellphy = rate_param_cleanup(
         x=np.ones(6, dtype=np.float64),
         log_freq_params=log_freq_params_cellphy,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
         rate_constraint=cellphy10_rate,
     )
 
@@ -342,7 +351,7 @@ def main_cli():
         rate_params_initial=rate_params_cellphy,
         log_freq_params=log_freq_params_cellphy,
         rate_constraint=cellphy10_rate,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
     )
 
     # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
@@ -399,7 +408,7 @@ def main_cli():
     rate_params_gtr10z = rate_param_cleanup(
         x=unphased_to_gtr10z(freq_params_gtr10z, rate_params_unphased),
         log_freq_params=log_freq_params_gtr10z,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
         rate_constraint=gtr10z_rate,
     )
 
@@ -422,7 +431,7 @@ def main_cli():
         rate_params_initial=rate_params_gtr10z,
         log_freq_params=log_freq_params_gtr10z,
         rate_constraint=gtr10z_rate,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
     )
 
     # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
@@ -498,7 +507,7 @@ def main_cli():
     rate_params_gtr10 = rate_param_cleanup(
         x=gtr10z_to_gtr10(rate_params_gtr10z),
         log_freq_params=log_freq_params_gtr10,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
         rate_constraint=gtr10_rate,
     )
 
@@ -521,7 +530,7 @@ def main_cli():
         rate_params_initial=rate_params_gtr10,
         log_freq_params=log_freq_params_gtr10,
         rate_constraint=gtr10_rate,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
     )
 
     # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
@@ -546,7 +555,7 @@ def main_cli():
     rate_params_16state = rate_param_cleanup(
         x=rate_params_4state,
         log_freq_params=log_freq_params_16state,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
         rate_constraint=phased_rate,
     )
 
@@ -569,7 +578,7 @@ def main_cli():
         rate_params_initial=rate_params_16state,
         log_freq_params=log_freq_params_16state,
         rate_constraint=phased_rate,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
     )
 
     # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
@@ -594,7 +603,7 @@ def main_cli():
     rate_params_16state_mp = rate_param_cleanup(
         x=np.concatenate((rate_params_16state, rate_params_16state), axis=0),
         log_freq_params=log_freq_params_16state_mp,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
         rate_constraint=phased_mp_rate,
     )
 
@@ -617,7 +626,7 @@ def main_cli():
         rate_params_initial=rate_params_16state_mp,
         log_freq_params=log_freq_params_16state_mp,
         rate_constraint=phased_mp_rate,
-        ploidy=2,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
     )
 
     # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
@@ -791,7 +800,7 @@ def fit_model(
     rate_params_initial = rate_param_cleanup(
         x=res.x[:num_rate_params],
         log_freq_params=log_freq_params,
-        ploidy=1,
+        ploidy=ploidy,
         rate_constraint=rate_constraint,
     )
 
