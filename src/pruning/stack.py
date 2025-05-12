@@ -660,7 +660,7 @@ def main_cli():
     with np.errstate(divide="ignore"):
         log_freq_params_16state_mp = np.clip(np.log(freq_params_16state_mp), -1e100, 0.0)
 
-    rate_params_16state_mp = (np.concatenate((rate_params_16state, rate_params_16state), axis=0),)
+    rate_params_16state_mp = np.concatenate((rate_params_16state, rate_params_16state), axis=0)
     if final_rp_norm:
         rate_params_16state_mp /= rate_params_16state_mp[-1]
     else:
