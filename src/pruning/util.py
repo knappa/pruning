@@ -270,6 +270,11 @@ def print_stats(*, rate_params, freq_params, neg_l, tree_distances, true_branch_
     print(f"stdev rel error: {np.std(rel_error) if len(rel_error) > 0 else float('nan')}")
 
 
+def rate_param_scale(*, x, log_freq_params, ploidy, rate_constraint) -> float:
+    rate_params = np.maximum(0.0, x)
+    return ploidy / rate_constraint(np.exp(log_freq_params), rate_params)
+
+
 def rate_param_cleanup(*, x, log_freq_params, ploidy, rate_constraint):
     rate_params = np.maximum(0.0, x)
     return rate_params * ploidy / rate_constraint(np.exp(log_freq_params), rate_params)

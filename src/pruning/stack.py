@@ -1,3 +1,6 @@
+import numpy as np
+
+
 def main_cli():
     import argparse
     import functools
@@ -28,7 +31,7 @@ def main_cli():
         unphased_rate,
     )
     from pruning.score_function_gen import compute_score_function, neg_log_likelihood_prototype
-    from pruning.util import rate_param_cleanup
+    from pruning.util import rate_param_cleanup, rate_param_scale
 
     parser = argparse.ArgumentParser(
         description="Compute log likelihood using the pruning algorithm"
@@ -78,6 +81,12 @@ def main_cli():
         "--ploidy", type=int, default=-1, help="force the ploidy to a specific value"
     )
 
+    parser.add_argument(
+        "--final_rp_norm",
+        action="store_true",
+        help="normalize rate parameters by setting final rate parameter to 1, instead of normalizing via mu",
+    )
+
     parser.add_argument("--ambig", type=str, default="?", help="ambiguity character")
     parser.add_argument("--output", type=str, help="output filename prefix for tree")
     parser.add_argument("--overwrite", action="store_true", help="overwrite outputs, if they exist")
@@ -114,19 +123,7 @@ def main_cli():
         exit(-1)
 
     force_ploidy: int = opt.ploidy
-
-    # freq_params = None
-    # if opt.optimize_freq_params:
-    #     freq_params_option = "OPTIMIZE"
-    #     raise NotImplementedError()
-    # elif opt.freq_params_from_seq:
-    #     freq_params_option = "FROM_SEQ"
-    # elif opt.fix_freq_params:
-    #     freq_params_option = "FIX"
-    #     freq_params = np.array(opt.fix_freq_params)
-    #     raise NotImplementedError()
-    # else:
-    #     freq_params_option = "FROM_SEQ"
+    final_rp_norm: bool = opt.final_rp_norm if hasattr(opt, "final_rp_norm") else False
 
     ################################################################################
     # read the true tree
@@ -229,12 +226,15 @@ def main_cli():
     with np.errstate(divide="ignore"):
         log_freq_params_4state = np.clip(np.log(freq_params_4state), -1e100, 0.0)
 
-    rate_params_4state = rate_param_cleanup(
-        x=np.ones(6),
-        log_freq_params=log_freq_params_4state,
-        ploidy=1 if force_ploidy == -1 else force_ploidy,
-        rate_constraint=gtr4_rate,
-    )
+    if final_rp_norm:
+        rate_params_4state = np.ones(6)
+    else:
+        rate_params_4state = rate_param_cleanup(
+            x=np.ones(6),
+            log_freq_params=log_freq_params_4state,
+            ploidy=1 if force_ploidy == -1 else force_ploidy,
+            rate_constraint=gtr4_rate,
+        )
 
     neg_log_likelihood_4state = functools.partial(
         neg_log_likelihood_prototype,
@@ -256,18 +256,25 @@ def main_cli():
         log_freq_params=log_freq_params_4state,
         rate_constraint=gtr4_rate,
         ploidy=1 if force_ploidy == -1 else force_ploidy,
+        final_rp_norm=final_rp_norm,
     )
 
-    # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
-    for idx, node in enumerate(true_tree.traverse()):
-        node.dist = branch_lengths_4state[idx]
-
-    newick_rep = true_tree.write(format=5)
-
     if hasattr(opt, "output") and opt.output is not None:
-        with open(opt.output + "-4state.nwk", "w") as file:
-            file.write(newick_rep)
-            file.write("\n")
+        save_as_newick(
+            branch_lengths=branch_lengths_4state,
+            scale=(
+                rate_param_scale(
+                    x=rate_params_4state,
+                    log_freq_params=log_freq_params_4state,
+                    ploidy=1 if force_ploidy == -1 else force_ploidy,
+                    rate_constraint=gtr4_rate,
+                )
+                if final_rp_norm
+                else 1
+            ),
+            output=opt.output + "-4state.nwk",
+            true_tree=true_tree,
+        )
 
     ##########################################################################################
     # Fit an unphased model
@@ -277,12 +284,15 @@ def main_cli():
     with np.errstate(divide="ignore"):
         log_freq_params_unphased = np.clip(np.log(freq_params_unphased), -1e100, 0.0)
 
-    rate_params_unphased = rate_param_cleanup(
-        x=rate_params_4state,
-        log_freq_params=log_freq_params_unphased,
-        ploidy=2 if force_ploidy == -1 else force_ploidy,
-        rate_constraint=unphased_rate,
-    )
+    if final_rp_norm:
+        rate_params_unphased = rate_params_4state / rate_params_4state[-1]
+    else:
+        rate_params_unphased = rate_param_cleanup(
+            x=rate_params_4state,
+            log_freq_params=log_freq_params_unphased,
+            ploidy=2 if force_ploidy == -1 else force_ploidy,
+            rate_constraint=unphased_rate,
+        )
 
     neg_log_likelihood_unphased = functools.partial(
         neg_log_likelihood_prototype,
@@ -304,18 +314,25 @@ def main_cli():
         log_freq_params=log_freq_params_unphased,
         rate_constraint=unphased_rate,
         ploidy=2 if force_ploidy == -1 else force_ploidy,
+        final_rp_norm=final_rp_norm,
     )
 
-    # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
-    for idx, node in enumerate(true_tree.traverse()):
-        node.dist = branch_lengths_unphased[idx]
-
-    newick_rep = true_tree.write(format=5)
-
     if hasattr(opt, "output") and opt.output is not None:
-        with open(opt.output + "-unphased.nwk", "w") as file:
-            file.write(newick_rep)
-            file.write("\n")
+        save_as_newick(
+            branch_lengths=branch_lengths_unphased,
+            scale=(
+                rate_param_scale(
+                    x=rate_params_unphased,
+                    log_freq_params=log_freq_params_unphased,
+                    ploidy=2 if force_ploidy == -1 else force_ploidy,
+                    rate_constraint=unphased_rate,
+                )
+                if final_rp_norm
+                else 1
+            ),
+            output=opt.output + "-unphased.nwk",
+            true_tree=true_tree,
+        )
 
     ##########################################################################################
     # Fit the cellphy model
@@ -325,12 +342,15 @@ def main_cli():
     with np.errstate(divide="ignore"):
         log_freq_params_cellphy = np.clip(np.log(freq_params_cellphy), -1e100, 0.0)
 
-    rate_params_cellphy = rate_param_cleanup(
-        x=np.ones(6, dtype=np.float64),
-        log_freq_params=log_freq_params_cellphy,
-        ploidy=2 if force_ploidy == -1 else force_ploidy,
-        rate_constraint=cellphy10_rate,
-    )
+    if final_rp_norm:
+        rate_params_cellphy = np.ones(6, dtype=np.float64)
+    else:
+        rate_params_cellphy = rate_param_cleanup(
+            x=np.ones(6, dtype=np.float64),
+            log_freq_params=log_freq_params_cellphy,
+            ploidy=2 if force_ploidy == -1 else force_ploidy,
+            rate_constraint=cellphy10_rate,
+        )
 
     neg_log_likelihood_cellphy = functools.partial(
         neg_log_likelihood_prototype,
@@ -352,18 +372,25 @@ def main_cli():
         log_freq_params=log_freq_params_cellphy,
         rate_constraint=cellphy10_rate,
         ploidy=2 if force_ploidy == -1 else force_ploidy,
+        final_rp_norm=final_rp_norm,
     )
 
-    # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
-    for idx, node in enumerate(true_tree.traverse()):
-        node.dist = branch_lengths_cellphy[idx]
-
-    newick_rep = true_tree.write(format=5)
-
     if hasattr(opt, "output") and opt.output is not None:
-        with open(opt.output + "-cellphy.nwk", "w") as file:
-            file.write(newick_rep)
-            file.write("\n")
+        save_as_newick(
+            branch_lengths=branch_lengths_cellphy,
+            scale=(
+                rate_param_scale(
+                    x=rate_params_cellphy,
+                    log_freq_params=log_freq_params_cellphy,
+                    ploidy=2 if force_ploidy == -1 else force_ploidy,
+                    rate_constraint=cellphy10_rate,
+                )
+                if final_rp_norm
+                else 1
+            ),
+            output=opt.output + "-cellphy.nwk",
+            true_tree=true_tree,
+        )
 
     ##########################################################################################
     # Fit a GTR10Z model
@@ -405,12 +432,16 @@ def main_cli():
             ]
         )
 
-    rate_params_gtr10z = rate_param_cleanup(
-        x=unphased_to_gtr10z(freq_params_gtr10z, rate_params_unphased),
-        log_freq_params=log_freq_params_gtr10z,
-        ploidy=2 if force_ploidy == -1 else force_ploidy,
-        rate_constraint=gtr10z_rate,
-    )
+    rate_params_gtr10z = unphased_to_gtr10z(freq_params_gtr10z, rate_params_unphased)
+    if final_rp_norm:
+        rate_params_gtr10z /= rate_params_gtr10z[-1]
+    else:
+        rate_params_gtr10z = rate_param_cleanup(
+            x=rate_params_gtr10z,
+            log_freq_params=log_freq_params_gtr10z,
+            ploidy=2 if force_ploidy == -1 else force_ploidy,
+            rate_constraint=gtr10z_rate,
+        )
 
     neg_log_likelihood_gtr10z = functools.partial(
         neg_log_likelihood_prototype,
@@ -432,18 +463,25 @@ def main_cli():
         log_freq_params=log_freq_params_gtr10z,
         rate_constraint=gtr10z_rate,
         ploidy=2 if force_ploidy == -1 else force_ploidy,
+        final_rp_norm=final_rp_norm,
     )
 
-    # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
-    for idx, node in enumerate(true_tree.traverse()):
-        node.dist = branch_lengths_gtr10z[idx]
-
-    newick_rep = true_tree.write(format=5)
-
     if hasattr(opt, "output") and opt.output is not None:
-        with open(opt.output + "-gtr10z.nwk", "w") as file:
-            file.write(newick_rep)
-            file.write("\n")
+        save_as_newick(
+            branch_lengths=branch_lengths_gtr10z,
+            scale=(
+                rate_param_scale(
+                    x=rate_params_gtr10z,
+                    log_freq_params=log_freq_params_gtr10z,
+                    ploidy=2 if force_ploidy == -1 else force_ploidy,
+                    rate_constraint=gtr10z_rate,
+                )
+                if final_rp_norm
+                else 1
+            ),
+            output=opt.output + "-gtr10z.nwk",
+            true_tree=true_tree,
+        )
 
     ##########################################################################################
     # Fit a GTR10 model
@@ -504,12 +542,16 @@ def main_cli():
             ]
         )
 
-    rate_params_gtr10 = rate_param_cleanup(
-        x=gtr10z_to_gtr10(rate_params_gtr10z),
-        log_freq_params=log_freq_params_gtr10,
-        ploidy=2 if force_ploidy == -1 else force_ploidy,
-        rate_constraint=gtr10_rate,
-    )
+    rate_params_gtr10 = gtr10z_to_gtr10(rate_params_gtr10z)
+    if final_rp_norm:
+        rate_params_gtr10 /= rate_params_gtr10[-1]
+    else:
+        rate_params_gtr10 = rate_param_cleanup(
+            x=rate_params_gtr10,
+            log_freq_params=log_freq_params_gtr10,
+            ploidy=2 if force_ploidy == -1 else force_ploidy,
+            rate_constraint=gtr10_rate,
+        )
 
     neg_log_likelihood_gtr10 = functools.partial(
         neg_log_likelihood_prototype,
@@ -531,18 +573,25 @@ def main_cli():
         log_freq_params=log_freq_params_gtr10,
         rate_constraint=gtr10_rate,
         ploidy=2 if force_ploidy == -1 else force_ploidy,
+        final_rp_norm=final_rp_norm,
     )
 
-    # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
-    for idx, node in enumerate(true_tree.traverse()):
-        node.dist = branch_lengths_gtr10[idx]
-
-    newick_rep = true_tree.write(format=5)
-
     if hasattr(opt, "output") and opt.output is not None:
-        with open(opt.output + "-gtr10.nwk", "w") as file:
-            file.write(newick_rep)
-            file.write("\n")
+        save_as_newick(
+            branch_lengths=branch_lengths_gtr10,
+            scale=(
+                rate_param_scale(
+                    x=rate_params_gtr10,
+                    log_freq_params=log_freq_params_gtr10,
+                    ploidy=2 if force_ploidy == -1 else force_ploidy,
+                    rate_constraint=gtr10_rate,
+                )
+                if final_rp_norm
+                else 1
+            ),
+            output=opt.output + "-gtr10.nwk",
+            true_tree=true_tree,
+        )
 
     ##########################################################################################
     # Fit a 16 state model with same Mat/Pat rates
@@ -552,12 +601,16 @@ def main_cli():
     with np.errstate(divide="ignore"):
         log_freq_params_16state = np.clip(np.log(freq_params_16state), -1e100, 0.0)
 
-    rate_params_16state = rate_param_cleanup(
-        x=rate_params_4state,
-        log_freq_params=log_freq_params_16state,
-        ploidy=2 if force_ploidy == -1 else force_ploidy,
-        rate_constraint=phased_rate,
-    )
+    rate_params_16state = rate_params_4state
+    if final_rp_norm:
+        rate_params_16state /= rate_params_16state[-1]
+    else:
+        rate_params_16state = rate_param_cleanup(
+            x=rate_params_16state,
+            log_freq_params=log_freq_params_16state,
+            ploidy=2 if force_ploidy == -1 else force_ploidy,
+            rate_constraint=phased_rate,
+        )
 
     neg_log_likelihood_16state = functools.partial(
         neg_log_likelihood_prototype,
@@ -579,18 +632,25 @@ def main_cli():
         log_freq_params=log_freq_params_16state,
         rate_constraint=phased_rate,
         ploidy=2 if force_ploidy == -1 else force_ploidy,
+        final_rp_norm=final_rp_norm,
     )
 
-    # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
-    for idx, node in enumerate(true_tree.traverse()):
-        node.dist = branch_lengths_16state[idx]
-
-    newick_rep = true_tree.write(format=5)
-
     if hasattr(opt, "output") and opt.output is not None:
-        with open(opt.output + "-16state.nwk", "w") as file:
-            file.write(newick_rep)
-            file.write("\n")
+        save_as_newick(
+            branch_lengths=branch_lengths_16state,
+            scale=(
+                rate_param_scale(
+                    x=rate_params_16state,
+                    log_freq_params=log_freq_params_16state,
+                    ploidy=2 if force_ploidy == -1 else force_ploidy,
+                    rate_constraint=phased_rate,
+                )
+                if final_rp_norm
+                else 1
+            ),
+            output=opt.output + "-16state.nwk",
+            true_tree=true_tree,
+        )
 
     ##########################################################################################
     # Fit a 16 state model with differing Mat/Pat rates
@@ -600,12 +660,16 @@ def main_cli():
     with np.errstate(divide="ignore"):
         log_freq_params_16state_mp = np.clip(np.log(freq_params_16state_mp), -1e100, 0.0)
 
-    rate_params_16state_mp = rate_param_cleanup(
-        x=np.concatenate((rate_params_16state, rate_params_16state), axis=0),
-        log_freq_params=log_freq_params_16state_mp,
-        ploidy=2 if force_ploidy == -1 else force_ploidy,
-        rate_constraint=phased_mp_rate,
-    )
+    rate_params_16state_mp = (np.concatenate((rate_params_16state, rate_params_16state), axis=0),)
+    if final_rp_norm:
+        rate_params_16state_mp /= rate_params_16state_mp[-1]
+    else:
+        rate_params_16state_mp = rate_param_cleanup(
+            x=rate_params_16state_mp,
+            log_freq_params=log_freq_params_16state_mp,
+            ploidy=2 if force_ploidy == -1 else force_ploidy,
+            rate_constraint=phased_mp_rate,
+        )
 
     neg_log_likelihood_16state_mp = functools.partial(
         neg_log_likelihood_prototype,
@@ -627,18 +691,25 @@ def main_cli():
         log_freq_params=log_freq_params_16state_mp,
         rate_constraint=phased_mp_rate,
         ploidy=2 if force_ploidy == -1 else force_ploidy,
+        final_rp_norm=final_rp_norm,
     )
 
-    # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
-    for idx, node in enumerate(true_tree.traverse()):
-        node.dist = branch_lengths_16state_mp[idx]
-
-    newick_rep = true_tree.write(format=5)
-
     if hasattr(opt, "output") and opt.output is not None:
-        with open(opt.output + "-16state_mp.nwk", "w") as file:
-            file.write(newick_rep)
-            file.write("\n")
+        save_as_newick(
+            branch_lengths=branch_lengths_16state_mp,
+            scale=(
+                rate_param_scale(
+                    x=rate_params_16state_mp,
+                    log_freq_params=log_freq_params_16state_mp,
+                    ploidy=2 if force_ploidy == -1 else force_ploidy,
+                    rate_constraint=phased_mp_rate,
+                )
+                if final_rp_norm
+                else 1
+            ),
+            output=opt.output + "-16state_mp.nwk",
+            true_tree=true_tree,
+        )
 
     ################################################################################
 
@@ -698,6 +769,18 @@ def main_cli():
     ################################################################################
 
 
+def save_as_newick(*, branch_lengths: np.ndarray, scale: float, output: str, true_tree):
+    # update branch lens in ETE3 tree, and write tree to a file, depending up command line opts
+    for idx, node in enumerate(true_tree.traverse()):
+        node.dist = branch_lengths[idx] * scale
+
+    newick_rep = true_tree.write(format=5)
+
+    with open(output, "w") as file:
+        file.write(newick_rep)
+        file.write("\n")
+
+
 def fit_model(
     *,
     branch_lengths_initial,
@@ -706,7 +789,8 @@ def fit_model(
     neg_log_likelihood,
     rate_constraint,
     ploidy,
-    log=True,
+    final_rp_norm: bool,
+    log: bool = True,
 ):
     import functools
 
@@ -728,11 +812,23 @@ def fit_model(
         neg_log_likelihood=neg_log_likelihood,
         rate_constraint=rate_constraint,
         ploidy=ploidy,
+        final_rp_norm=final_rp_norm,
     )
     branch_length_objective = functools.partial(
         branch_length_objective_prototype,
         neg_log_likelihood=neg_log_likelihood,
     )
+
+    if final_rp_norm:
+        rate_params_initial = rate_params_initial / rate_params_initial[-1]
+    else:
+        # fine tune mu
+        rate_params_initial = rate_param_cleanup(
+            x=rate_params_initial,
+            log_freq_params=log_freq_params,
+            ploidy=ploidy,
+            rate_constraint=rate_constraint,
+        )
 
     # alternate a few times between optimizing the rate parameters and the branch lengths.
     for _ in range(3):
@@ -752,13 +848,16 @@ def fit_model(
         if log:
             print(res)
 
-        # fine tune mu
-        rate_params_initial = rate_param_cleanup(
-            x=res.x,
-            log_freq_params=log_freq_params,
-            ploidy=ploidy,
-            rate_constraint=rate_constraint,
-        )
+        if final_rp_norm:
+            rate_params_initial = res.x / res.x[-1]
+        else:
+            # fine tune mu
+            rate_params_initial = rate_param_cleanup(
+                x=res.x,
+                log_freq_params=log_freq_params,
+                ploidy=ploidy,
+                rate_constraint=rate_constraint,
+            )
 
         res = minimize(
             branch_length_objective,
@@ -783,6 +882,7 @@ def fit_model(
         neg_log_likelihood=neg_log_likelihood,
         rate_constraint=rate_constraint,
         ploidy=ploidy,
+        final_rp_norm=final_rp_norm,
     )
     res = minimize(
         params_distances_objective,
@@ -796,15 +896,19 @@ def fit_model(
     if log:
         print(res)
 
-    # fine tune mu
-    rate_params_initial = rate_param_cleanup(
-        x=res.x[:num_rate_params],
-        log_freq_params=log_freq_params,
-        ploidy=ploidy,
-        rate_constraint=rate_constraint,
-    )
+    rate_params_initial = res.x[:num_rate_params]
+    if final_rp_norm:
+        rate_params_initial = rate_params_initial / rate_params_initial[-1]
+    else:
+        # fine tune mu
+        rate_params_initial = rate_param_cleanup(
+            x=rate_params_initial,
+            log_freq_params=log_freq_params,
+            ploidy=ploidy,
+            rate_constraint=rate_constraint,
+        )
 
-    branch_lengths_initial = np.maximum(0.0, res.x[num_rate_params:])
+    branch_lengths_initial = np.clip(res.x[num_rate_params:], 0.0, np.inf)
 
     res = minimize(
         params_distances_objective,
@@ -818,15 +922,19 @@ def fit_model(
     if log:
         print(res)
 
-    # fine tune mu
-    rate_params_initial = rate_param_cleanup(
-        x=res.x[:num_rate_params],
-        log_freq_params=log_freq_params,
-        ploidy=ploidy,
-        rate_constraint=rate_constraint,
-    )
+    rate_params_initial = res.x[:num_rate_params]
+    if final_rp_norm:
+        rate_params_initial = rate_params_initial / rate_params_initial[-1]
+    else:
+        # fine tune mu
+        rate_params_initial = rate_param_cleanup(
+            x=rate_params_initial,
+            log_freq_params=log_freq_params,
+            ploidy=ploidy,
+            rate_constraint=rate_constraint,
+        )
 
-    branch_lengths_initial = np.maximum(0.0, res.x[num_rate_params:])
+    branch_lengths_initial = np.clip(res.x[num_rate_params:], 0.0, np.inf)
 
     return rate_params_initial, branch_lengths_initial, res.fun
 

@@ -6,7 +6,7 @@ def rate_param_objective_prototype(
     log_freq_params,
     branch_lengths,
     *,
-    gt_norm=False,
+    final_rp_norm=False,
     neg_log_likelihood,
     rate_constraint,
     ploidy: Union[int, float],
@@ -17,7 +17,7 @@ def rate_param_objective_prototype(
     :param rate_params:
     :param log_freq_params: (fixed)
     :param branch_lengths: (fixed)
-    :param gt_norm: if True, normalize the GT rate to 1
+    :param final_rp_norm: if True, normalize the final rate parameter to 1
     :param neg_log_likelihood:
     :param rate_constraint:
     :param ploidy:
@@ -25,7 +25,7 @@ def rate_param_objective_prototype(
     """
     import numpy as np
 
-    if gt_norm:
+    if final_rp_norm:
         loss = neg_log_likelihood(log_freq_params, rate_params / rate_params[-1], branch_lengths)
         loss += (rate_params[-1] - 1) ** 2
     else:
@@ -58,8 +58,8 @@ def branch_length_objective_prototype(
 def param_objective_prototype(
     params,
     branch_lengths,
-    gt_norm=False,
     *,
+    final_rp_norm=False,
     num_freq_params: int,
     neg_log_likelihood,
     rate_constraint,
@@ -70,7 +70,7 @@ def param_objective_prototype(
 
     :param params: frequencies+rate_params
     :param branch_lengths: (fixed)
-    :param gt_norm: if True, normalize the GT rate to 1
+    :param final_rp_norm: if True, normalize the final rate parameter to 1
     :param num_freq_params:
     :param neg_log_likelihood:
     :param rate_constraint:
@@ -86,7 +86,7 @@ def param_objective_prototype(
 
     rate_params = params[num_freq_params:]
 
-    if gt_norm:
+    if final_rp_norm:
         loss = neg_log_likelihood(log_freq_params, rate_params / rate_params[-1], branch_lengths)
         loss += (rate_params[-1] - 1) ** 2
     else:
@@ -104,7 +104,7 @@ def param_objective_prototype(
 def full_objective_prototype(
     params,
     *,
-    gt_norm=False,
+    final_rp_norm=False,
     num_freq_params: int,
     num_rate_params: int,
     neg_log_likelihood,
@@ -115,7 +115,7 @@ def full_objective_prototype(
     Full objective function.
 
     :param params: first entries are frequencies, next entries are the model params, rest are branch lengths
-    :param gt_norm: if True, normalize the GT rate to 1
+    :param final_rp_norm: if True, normalize the final rate parameter to 1
     :param num_freq_params:
     :param num_rate_params:
     :param neg_log_likelihood:
@@ -133,7 +133,7 @@ def full_objective_prototype(
     rate_params = params[num_freq_params : num_freq_params + num_rate_params]
     branch_lengths = params[num_freq_params + num_rate_params :]
 
-    if gt_norm:
+    if final_rp_norm:
         loss = neg_log_likelihood(log_freq_params, rate_params / rate_params[-1], branch_lengths)
         loss += (rate_params[-1] - 1) ** 2
     else:
@@ -157,7 +157,7 @@ def rates_distances_objective_prototype(
     params,
     log_freq_params,
     *,
-    gt_norm=False,
+    final_rp_norm=False,
     num_rate_params,
     neg_log_likelihood,
     rate_constraint,
@@ -168,7 +168,7 @@ def rates_distances_objective_prototype(
 
     :param params: first entries are the model params, rest are branch lengths
     :param log_freq_params: state frequencies
-    :param gt_norm: if True, normalize the GT rate to 1
+    :param final_rp_norm: if True, normalize the final rate parameter to 1
     :param num_rate_params:
     :param neg_log_likelihood:
     :param rate_constraint:
@@ -180,7 +180,7 @@ def rates_distances_objective_prototype(
     rate_params = params[:num_rate_params]
     branch_lengths = params[num_rate_params:]
 
-    if gt_norm:
+    if final_rp_norm:
         loss = neg_log_likelihood(log_freq_params, rate_params / rate_params[-1], branch_lengths)
         loss += (rate_params[-1] - 1) ** 2  # fix the rate
     else:
