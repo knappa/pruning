@@ -13,24 +13,17 @@ def main_cli():
         compute_initial_tree_distance_estimates,
         fit_model,
         gtr10z_to_gtr10,
-        print_states,
         read_sequences,
         save_as_newick,
     )
     from pruning.matrices import (
         cellphy10_rate,
-        gtr4_rate,
         gtr10_rate,
         gtr10z_rate,
         make_cellphy_prob_model,
         make_gtr10_prob_model,
         make_gtr10z_prob_model,
-        make_GTR_prob_model,
-        make_GTRsq_prob_model,
-        make_GTRxGTR_prob_model,
         make_unphased_GTRsq_prob_model,
-        phased_mp_rate,
-        phased_rate,
         pi10s_to_pi4s,
         unphased_freq_param_cleanup,
         unphased_rate,
@@ -193,64 +186,6 @@ def main_cli():
         true_branch_lens[node_indices[node.name]] = node.dist
 
     ##########################################################################################
-    # Fit a 4 state model
-    # num_rate_params = 6
-
-    freq_params_4state = seq_pi4
-    with np.errstate(divide="ignore"):
-        log_freq_params_4state = np.clip(np.log(freq_params_4state), -1e100, 0.0)
-
-    if final_rp_norm:
-        rate_params_4state = np.ones(6)
-    else:
-        rate_params_4state = rate_param_cleanup(
-            x=np.ones(6),
-            log_freq_params=log_freq_params_4state,
-            ploidy=1 if force_ploidy == -1 else force_ploidy,
-            rate_constraint=gtr4_rate,
-        )
-
-    neg_log_likelihood_4state = functools.partial(
-        neg_log_likelihood_prototype,
-        prob_model_maker=make_GTR_prob_model,
-        score_function=compute_score_function(
-            root=true_tree,
-            patterns=np.array([pattern for pattern in counts_4state.keys()]),
-            pattern_counts=np.array([count for count in counts_4state.values()]),
-            num_states=4,
-            taxa_indices=taxa_indices,
-            node_indices=node_indices,
-        ),
-    )
-
-    rate_params_4state, branch_lengths_4state, nll_4state = fit_model(
-        neg_log_likelihood=neg_log_likelihood_4state,
-        branch_lengths=branch_lengths_init,
-        rate_params=rate_params_4state,
-        log_freq_params=log_freq_params_4state,
-        rate_constraint=gtr4_rate,
-        ploidy=1 if force_ploidy == -1 else force_ploidy,
-        final_rp_norm=final_rp_norm,
-    )
-
-    if hasattr(opt, "output") and opt.output is not None:
-        save_as_newick(
-            branch_lengths=branch_lengths_4state,
-            scale=(
-                rate_param_scale(
-                    x=rate_params_4state,
-                    log_freq_params=log_freq_params_4state,
-                    ploidy=1 if force_ploidy == -1 else force_ploidy,
-                    rate_constraint=gtr4_rate,
-                )
-                if final_rp_norm
-                else 1
-            ),
-            output=opt.output + "-4state.nwk",
-            true_tree=true_tree,
-        )
-
-    ##########################################################################################
     # Fit an unphased model
     # num_rate_params = 6
 
@@ -258,11 +193,12 @@ def main_cli():
     with np.errstate(divide="ignore"):
         log_freq_params_unphased = np.clip(np.log(freq_params_unphased), -1e100, 0.0)
 
+    rate_params_unphased = np.ones(6, dtype=np.float64)
     if final_rp_norm:
-        rate_params_unphased = rate_params_4state / rate_params_4state[-1]
+        rate_params_unphased = rate_params_unphased / rate_params_unphased[-1]
     else:
         rate_params_unphased = rate_param_cleanup(
-            x=rate_params_4state,
+            x=rate_params_unphased,
             log_freq_params=log_freq_params_unphased,
             ploidy=2 if force_ploidy == -1 else force_ploidy,
             rate_constraint=unphased_rate,
@@ -283,7 +219,7 @@ def main_cli():
 
     rate_params_unphased, branch_lengths_unphased, nll_unphased = fit_model(
         neg_log_likelihood=neg_log_likelihood_unphased,
-        branch_lengths=branch_lengths_4state,
+        branch_lengths=branch_lengths_init,
         rate_params=rate_params_unphased,
         log_freq_params=log_freq_params_unphased,
         rate_constraint=unphased_rate,
@@ -305,6 +241,164 @@ def main_cli():
                 else 1
             ),
             output=opt.output + "-unphased.nwk",
+            true_tree=true_tree,
+        )
+
+    ##########################################################################################
+    # Fit a GTR10Z model, based on the unphased model
+    # num_rate_params = 24
+
+    freq_params_gtr10z_from_unphased = seq_pi10
+    with np.errstate(divide="ignore"):
+        log_freq_params_gtr10z = np.clip(np.log(freq_params_gtr10z_from_unphased), -1e100, 0.0)
+
+    def unphased_to_gtr10z(pis10, rate_params):
+        pi_a, pi_c, pi_g, pi_t = pi10s_to_pi4s(pis10)
+        s_ac, s_ag, s_at, s_cg, s_ct, s_gt = np.clip(rate_params, 0.0, np.inf)
+        return np.array(
+            [
+                s_ac / pi_a,
+                s_ag / pi_a,
+                s_at / pi_a,
+                s_ac / pi_c,
+                s_cg / pi_c,
+                s_ct / pi_c,
+                s_ag / pi_g,
+                s_cg / pi_g,
+                s_gt / pi_g,
+                s_at / pi_t,
+                s_ct / pi_t,
+                s_gt / pi_t,
+                s_cg / (2 * pi_a),
+                s_ct / (2 * pi_a),
+                s_ag / (2 * pi_c),
+                s_at / (2 * pi_c),
+                s_gt / (2 * pi_a),
+                s_ac / (2 * pi_g),
+                s_at / (2 * pi_g),
+                s_ac / (2 * pi_t),
+                s_ag / (2 * pi_t),
+                s_gt / (2 * pi_c),
+                s_ct / (2 * pi_g),
+                s_cg / (2 * pi_t),
+            ]
+        )
+
+    rate_params_gtr10z_from_unphased = unphased_to_gtr10z(
+        freq_params_gtr10z_from_unphased, rate_params_unphased
+    )
+    if final_rp_norm:
+        rate_params_gtr10z_from_unphased /= rate_params_gtr10z_from_unphased[-1]
+    else:
+        rate_params_gtr10z_from_unphased = rate_param_cleanup(
+            x=rate_params_gtr10z_from_unphased,
+            log_freq_params=log_freq_params_gtr10z,
+            ploidy=2 if force_ploidy == -1 else force_ploidy,
+            rate_constraint=gtr10z_rate,
+        )
+
+    neg_log_likelihood_gtr10z = functools.partial(
+        neg_log_likelihood_prototype,
+        prob_model_maker=make_gtr10z_prob_model,
+        score_function=compute_score_function(
+            root=true_tree,
+            patterns=np.array([pattern for pattern in counts_10state.keys()]),
+            pattern_counts=np.array([count for count in counts_10state.values()]),
+            num_states=10,
+            taxa_indices=taxa_indices,
+            node_indices=node_indices,
+        ),
+    )
+
+    (
+        rate_params_gtr10z_from_unphased,
+        branch_lengths_gtr10z_from_unphased,
+        nll_gtr10z_from_unphased,
+    ) = fit_model(
+        neg_log_likelihood=neg_log_likelihood_gtr10z,
+        branch_lengths=branch_lengths_unphased,
+        rate_params=rate_params_gtr10z_from_unphased,
+        log_freq_params=log_freq_params_gtr10z,
+        rate_constraint=gtr10z_rate,
+        ploidy=2 if force_ploidy == -1 else force_ploidy,
+        final_rp_norm=final_rp_norm,
+    )
+
+    if hasattr(opt, "output") and opt.output is not None:
+        save_as_newick(
+            branch_lengths=branch_lengths_gtr10z_from_unphased,
+            scale=(
+                rate_param_scale(
+                    x=rate_params_gtr10z_from_unphased,
+                    log_freq_params=log_freq_params_gtr10z,
+                    ploidy=2 if force_ploidy == -1 else force_ploidy,
+                    rate_constraint=gtr10z_rate,
+                )
+                if final_rp_norm
+                else 1
+            ),
+            output=opt.output + "-gtr10z-from-unphased.nwk",
+            true_tree=true_tree,
+        )
+
+    ##########################################################################################
+    # Fit a GTR10 model
+    # num_rate_params = 45
+
+    freq_params_gtr10_from_unphased = seq_pi10
+    with np.errstate(divide="ignore"):
+        log_freq_params_gtr10 = np.clip(np.log(freq_params_gtr10_from_unphased), -1e100, 0.0)
+
+    rate_params_gtr10_from_unphased = gtr10z_to_gtr10(rate_params_gtr10z_from_unphased)
+    if final_rp_norm:
+        rate_params_gtr10_from_unphased /= rate_params_gtr10_from_unphased[-1]
+    else:
+        rate_params_gtr10_from_unphased = rate_param_cleanup(
+            x=rate_params_gtr10_from_unphased,
+            log_freq_params=log_freq_params_gtr10,
+            ploidy=2 if force_ploidy == -1 else force_ploidy,
+            rate_constraint=gtr10_rate,
+        )
+
+    neg_log_likelihood_gtr10 = functools.partial(
+        neg_log_likelihood_prototype,
+        prob_model_maker=make_gtr10_prob_model,
+        score_function=compute_score_function(
+            root=true_tree,
+            patterns=np.array([pattern for pattern in counts_10state.keys()]),
+            pattern_counts=np.array([count for count in counts_10state.values()]),
+            num_states=10,
+            taxa_indices=taxa_indices,
+            node_indices=node_indices,
+        ),
+    )
+
+    rate_params_gtr10_from_unphased, branch_lengths_gtr10_from_unphased, nll_gtr10_from_unphased = (
+        fit_model(
+            neg_log_likelihood=neg_log_likelihood_gtr10,
+            branch_lengths=branch_lengths_gtr10z_from_unphased,
+            rate_params=rate_params_gtr10_from_unphased,
+            log_freq_params=log_freq_params_gtr10,
+            rate_constraint=gtr10_rate,
+            ploidy=2 if force_ploidy == -1 else force_ploidy,
+            final_rp_norm=final_rp_norm,
+        )
+    )
+
+    if hasattr(opt, "output") and opt.output is not None:
+        save_as_newick(
+            branch_lengths=branch_lengths_gtr10_from_unphased,
+            scale=(
+                rate_param_scale(
+                    x=rate_params_gtr10_from_unphased,
+                    log_freq_params=log_freq_params_gtr10,
+                    ploidy=2 if force_ploidy == -1 else force_ploidy,
+                    rate_constraint=gtr10_rate,
+                )
+                if final_rp_norm
+                else 1
+            ),
+            output=opt.output + "-gtr10-from-unphased.nwk",
             true_tree=true_tree,
         )
 
@@ -341,7 +435,7 @@ def main_cli():
 
     rate_params_cellphy, branch_lengths_cellphy, nll_cellphy = fit_model(
         neg_log_likelihood=neg_log_likelihood_cellphy,
-        branch_lengths=branch_lengths_4state,
+        branch_lengths=branch_lengths_init,
         rate_params=rate_params_cellphy,
         log_freq_params=log_freq_params_cellphy,
         rate_constraint=cellphy10_rate,
@@ -367,57 +461,56 @@ def main_cli():
         )
 
     ##########################################################################################
-    # Fit a GTR10Z model
+    # Fit a GTR10Z model, from the cellphy model
     # num_rate_params = 24
 
-    freq_params_gtr10z = seq_pi10
+    freq_params_gtr10z_from_cellphy = seq_pi10
     with np.errstate(divide="ignore"):
-        log_freq_params_gtr10z = np.clip(np.log(freq_params_gtr10z), -1e100, 0.0)
+        log_freq_params_gtr10z = np.clip(np.log(freq_params_gtr10z_from_cellphy), -1e100, 0.0)
 
-    def unphased_to_gtr10z(pis10, rate_params):
-        pi_a, pi_c, pi_g, pi_t = pi10s_to_pi4s(pis10)
+    def cellphy_to_gtr10z(rate_params):
         s_ac, s_ag, s_at, s_cg, s_ct, s_gt = np.clip(rate_params, 0.0, np.inf)
         return np.array(
             [
-                s_ac / pi_a,
-                s_ag / pi_a,
-                s_at / pi_a,
-                s_ac / pi_c,
-                s_cg / pi_c,
-                s_ct / pi_c,
-                s_ag / pi_g,
-                s_cg / pi_g,
-                s_gt / pi_g,
-                s_at / pi_t,
-                s_ct / pi_t,
-                s_gt / pi_t,
-                s_cg / (2 * pi_a),
-                s_ct / (2 * pi_a),
-                s_ag / (2 * pi_c),
-                s_at / (2 * pi_c),
-                s_gt / (2 * pi_a),
-                s_ac / (2 * pi_g),
-                s_at / (2 * pi_g),
-                s_ac / (2 * pi_t),
-                s_ag / (2 * pi_t),
-                s_gt / (2 * pi_c),
-                s_ct / (2 * pi_g),
-                s_cg / (2 * pi_t),
+                s_ac,
+                s_ag,
+                s_at,
+                s_ac,
+                s_cg,
+                s_ct,
+                s_ag,
+                s_cg,
+                s_gt,
+                s_at,
+                s_ct,
+                s_gt,
+                s_cg,
+                s_ct,
+                s_ag,
+                s_at,
+                s_gt,
+                s_ac,
+                s_at,
+                s_ac,
+                s_ag,
+                s_gt,
+                s_ct,
+                s_cg,
             ]
         )
 
-    rate_params_gtr10z = unphased_to_gtr10z(freq_params_gtr10z, rate_params_unphased)
+    rate_params_gtr10z_from_cellphy = cellphy_to_gtr10z(rate_params_cellphy)
     if final_rp_norm:
-        rate_params_gtr10z /= rate_params_gtr10z[-1]
+        rate_params_gtr10z_from_cellphy /= rate_params_gtr10z_from_cellphy[-1]
     else:
-        rate_params_gtr10z = rate_param_cleanup(
-            x=rate_params_gtr10z,
+        rate_params_gtr10z_from_cellphy = rate_param_cleanup(
+            x=rate_params_gtr10z_from_cellphy,
             log_freq_params=log_freq_params_gtr10z,
             ploidy=2 if force_ploidy == -1 else force_ploidy,
             rate_constraint=gtr10z_rate,
         )
 
-    neg_log_likelihood_gtr10z = functools.partial(
+    neg_log_likelihood_gtr10z_from_cellphy = functools.partial(
         neg_log_likelihood_prototype,
         prob_model_maker=make_gtr10z_prob_model,
         score_function=compute_score_function(
@@ -430,22 +523,24 @@ def main_cli():
         ),
     )
 
-    rate_params_gtr10z, branch_lengths_gtr10z, nll_gtr10z = fit_model(
-        neg_log_likelihood=neg_log_likelihood_gtr10z,
-        branch_lengths=branch_lengths_unphased,
-        rate_params=rate_params_gtr10z,
-        log_freq_params=log_freq_params_gtr10z,
-        rate_constraint=gtr10z_rate,
-        ploidy=2 if force_ploidy == -1 else force_ploidy,
-        final_rp_norm=final_rp_norm,
+    rate_params_gtr10z_from_cellphy, branch_lengths_gtr10z_from_cellphy, nll_gtr10z_from_cellphy = (
+        fit_model(
+            neg_log_likelihood=neg_log_likelihood_gtr10z_from_cellphy,
+            branch_lengths=branch_lengths_cellphy,
+            rate_params=rate_params_gtr10z_from_cellphy,
+            log_freq_params=log_freq_params_gtr10z,
+            rate_constraint=gtr10z_rate,
+            ploidy=2 if force_ploidy == -1 else force_ploidy,
+            final_rp_norm=final_rp_norm,
+        )
     )
 
     if hasattr(opt, "output") and opt.output is not None:
         save_as_newick(
-            branch_lengths=branch_lengths_gtr10z,
+            branch_lengths=branch_lengths_gtr10z_from_cellphy,
             scale=(
                 rate_param_scale(
-                    x=rate_params_gtr10z,
+                    x=rate_params_gtr10z_from_cellphy,
                     log_freq_params=log_freq_params_gtr10z,
                     ploidy=2 if force_ploidy == -1 else force_ploidy,
                     rate_constraint=gtr10z_rate,
@@ -453,7 +548,7 @@ def main_cli():
                 if final_rp_norm
                 else 1
             ),
-            output=opt.output + "-gtr10z.nwk",
+            output=opt.output + "-gtr10z-from-cellphy.nwk",
             true_tree=true_tree,
         )
 
@@ -461,16 +556,16 @@ def main_cli():
     # Fit a GTR10 model
     # num_rate_params = 45
 
-    freq_params_gtr10 = seq_pi10
+    freq_params_gtr10_from_cellphy = seq_pi10
     with np.errstate(divide="ignore"):
-        log_freq_params_gtr10 = np.clip(np.log(freq_params_gtr10), -1e100, 0.0)
+        log_freq_params_gtr10 = np.clip(np.log(freq_params_gtr10_from_cellphy), -1e100, 0.0)
 
-    rate_params_gtr10 = gtr10z_to_gtr10(rate_params_gtr10z)
+    rate_params_gtr10_from_cellphy = gtr10z_to_gtr10(rate_params_gtr10z_from_cellphy)
     if final_rp_norm:
-        rate_params_gtr10 /= rate_params_gtr10[-1]
+        rate_params_gtr10_from_cellphy /= rate_params_gtr10_from_cellphy[-1]
     else:
-        rate_params_gtr10 = rate_param_cleanup(
-            x=rate_params_gtr10,
+        rate_params_gtr10_from_cellphy = rate_param_cleanup(
+            x=rate_params_gtr10_from_cellphy,
             log_freq_params=log_freq_params_gtr10,
             ploidy=2 if force_ploidy == -1 else force_ploidy,
             rate_constraint=gtr10_rate,
@@ -489,22 +584,24 @@ def main_cli():
         ),
     )
 
-    rate_params_gtr10, branch_lengths_gtr10, nll_gtr10 = fit_model(
-        neg_log_likelihood=neg_log_likelihood_gtr10,
-        branch_lengths=branch_lengths_gtr10z,
-        rate_params=rate_params_gtr10,
-        log_freq_params=log_freq_params_gtr10,
-        rate_constraint=gtr10_rate,
-        ploidy=2 if force_ploidy == -1 else force_ploidy,
-        final_rp_norm=final_rp_norm,
+    rate_params_gtr10_from_cellphy, branch_lengths_gtr10_from_cellphy, nll_gtr10_from_cellphy = (
+        fit_model(
+            neg_log_likelihood=neg_log_likelihood_gtr10,
+            branch_lengths=branch_lengths_gtr10z_from_cellphy,
+            rate_params=rate_params_gtr10_from_cellphy,
+            log_freq_params=log_freq_params_gtr10,
+            rate_constraint=gtr10_rate,
+            ploidy=2 if force_ploidy == -1 else force_ploidy,
+            final_rp_norm=final_rp_norm,
+        )
     )
 
     if hasattr(opt, "output") and opt.output is not None:
         save_as_newick(
-            branch_lengths=branch_lengths_gtr10,
+            branch_lengths=branch_lengths_gtr10_from_cellphy,
             scale=(
                 rate_param_scale(
-                    x=rate_params_gtr10,
+                    x=rate_params_gtr10_from_cellphy,
                     log_freq_params=log_freq_params_gtr10,
                     ploidy=2 if force_ploidy == -1 else force_ploidy,
                     rate_constraint=gtr10_rate,
@@ -512,125 +609,7 @@ def main_cli():
                 if final_rp_norm
                 else 1
             ),
-            output=opt.output + "-gtr10.nwk",
-            true_tree=true_tree,
-        )
-
-    ##########################################################################################
-    # Fit a 16 state model with same Mat/Pat rates
-    # num_rate_params = 6
-
-    freq_params_16state = seq_pi16
-    with np.errstate(divide="ignore"):
-        log_freq_params_16state = np.clip(np.log(freq_params_16state), -1e100, 0.0)
-
-    rate_params_16state = rate_params_4state
-    if final_rp_norm:
-        rate_params_16state /= rate_params_16state[-1]
-    else:
-        rate_params_16state = rate_param_cleanup(
-            x=rate_params_16state,
-            log_freq_params=log_freq_params_16state,
-            ploidy=2 if force_ploidy == -1 else force_ploidy,
-            rate_constraint=phased_rate,
-        )
-
-    neg_log_likelihood_16state = functools.partial(
-        neg_log_likelihood_prototype,
-        prob_model_maker=make_GTRsq_prob_model,
-        score_function=compute_score_function(
-            root=true_tree,
-            patterns=np.array([pattern for pattern in counts_16state.keys()]),
-            pattern_counts=np.array([count for count in counts_16state.values()]),
-            num_states=16,
-            taxa_indices=taxa_indices,
-            node_indices=node_indices,
-        ),
-    )
-
-    rate_params_16state, branch_lengths_16state, nll_16state = fit_model(
-        neg_log_likelihood=neg_log_likelihood_16state,
-        branch_lengths=branch_lengths_4state,
-        rate_params=rate_params_16state,
-        log_freq_params=log_freq_params_16state,
-        rate_constraint=phased_rate,
-        ploidy=2 if force_ploidy == -1 else force_ploidy,
-        final_rp_norm=final_rp_norm,
-    )
-
-    if hasattr(opt, "output") and opt.output is not None:
-        save_as_newick(
-            branch_lengths=branch_lengths_16state,
-            scale=(
-                rate_param_scale(
-                    x=rate_params_16state,
-                    log_freq_params=log_freq_params_16state,
-                    ploidy=2 if force_ploidy == -1 else force_ploidy,
-                    rate_constraint=phased_rate,
-                )
-                if final_rp_norm
-                else 1
-            ),
-            output=opt.output + "-16state.nwk",
-            true_tree=true_tree,
-        )
-
-    ##########################################################################################
-    # Fit a 16 state model with differing Mat/Pat rates
-    # num_rate_params = 12
-
-    freq_params_16state_mp = seq_pi16
-    with np.errstate(divide="ignore"):
-        log_freq_params_16state_mp = np.clip(np.log(freq_params_16state_mp), -1e100, 0.0)
-
-    rate_params_16state_mp = np.concatenate((rate_params_16state, rate_params_16state), axis=0)
-    if final_rp_norm:
-        rate_params_16state_mp /= rate_params_16state_mp[-1]
-    else:
-        rate_params_16state_mp = rate_param_cleanup(
-            x=rate_params_16state_mp,
-            log_freq_params=log_freq_params_16state_mp,
-            ploidy=2 if force_ploidy == -1 else force_ploidy,
-            rate_constraint=phased_mp_rate,
-        )
-
-    neg_log_likelihood_16state_mp = functools.partial(
-        neg_log_likelihood_prototype,
-        prob_model_maker=make_GTRxGTR_prob_model,
-        score_function=compute_score_function(
-            root=true_tree,
-            patterns=np.array([pattern for pattern in counts_16state.keys()]),
-            pattern_counts=np.array([count for count in counts_16state.values()]),
-            num_states=16,
-            taxa_indices=taxa_indices,
-            node_indices=node_indices,
-        ),
-    )
-
-    rate_params_16state_mp, branch_lengths_16state_mp, nll_16state_mp = fit_model(
-        neg_log_likelihood=neg_log_likelihood_16state_mp,
-        branch_lengths=branch_lengths_16state,
-        rate_params=rate_params_16state_mp,
-        log_freq_params=log_freq_params_16state_mp,
-        rate_constraint=phased_mp_rate,
-        ploidy=2 if force_ploidy == -1 else force_ploidy,
-        final_rp_norm=final_rp_norm,
-    )
-
-    if hasattr(opt, "output") and opt.output is not None:
-        save_as_newick(
-            branch_lengths=branch_lengths_16state_mp,
-            scale=(
-                rate_param_scale(
-                    x=rate_params_16state_mp,
-                    log_freq_params=log_freq_params_16state_mp,
-                    ploidy=2 if force_ploidy == -1 else force_ploidy,
-                    rate_constraint=phased_mp_rate,
-                )
-                if final_rp_norm
-                else 1
-            ),
-            output=opt.output + "-16state_mp.nwk",
+            output=opt.output + "-gtr10-from-cellphy.nwk",
             true_tree=true_tree,
         )
 
@@ -640,49 +619,111 @@ def main_cli():
         with open(opt.output + ".csv", "w") as file:
             with redirect_stdout(file):
                 print_states(
-                    freq_params_4state,
-                    rate_params_4state,
-                    nll_4state,
                     freq_params_unphased,
                     rate_params_unphased,
                     nll_unphased,
                     freq_params_cellphy,
                     rate_params_cellphy,
                     nll_cellphy,
-                    freq_params_gtr10z,
-                    rate_params_gtr10z,
-                    nll_gtr10z,
-                    freq_params_gtr10,
-                    rate_params_gtr10,
-                    nll_gtr10,
-                    freq_params_16state,
-                    rate_params_16state,
-                    nll_16state,
-                    freq_params_16state_mp,
-                    rate_params_16state_mp,
-                    nll_16state_mp,
+                    freq_params_gtr10z_from_unphased,
+                    rate_params_gtr10z_from_unphased,
+                    nll_gtr10z_from_unphased,
+                    freq_params_gtr10_from_unphased,
+                    rate_params_gtr10_from_unphased,
+                    nll_gtr10_from_unphased,
+                    freq_params_gtr10z_from_cellphy,
+                    rate_params_gtr10z_from_cellphy,
+                    nll_gtr10z_from_cellphy,
+                    freq_params_gtr10_from_cellphy,
+                    rate_params_gtr10_from_cellphy,
+                    nll_gtr10_from_cellphy,
                 )
     else:
         print_states(
-            freq_params_4state,
-            rate_params_4state,
-            nll_4state,
             freq_params_unphased,
             rate_params_unphased,
             nll_unphased,
             freq_params_cellphy,
             rate_params_cellphy,
             nll_cellphy,
-            freq_params_gtr10z,
-            rate_params_gtr10z,
-            nll_gtr10z,
-            freq_params_gtr10,
-            rate_params_gtr10,
-            nll_gtr10,
-            freq_params_16state,
-            rate_params_16state,
-            nll_16state,
-            freq_params_16state_mp,
-            rate_params_16state_mp,
-            nll_16state_mp,
+            freq_params_gtr10z_from_unphased,
+            rate_params_gtr10z_from_unphased,
+            nll_gtr10z_from_unphased,
+            freq_params_gtr10_from_unphased,
+            rate_params_gtr10_from_unphased,
+            nll_gtr10_from_unphased,
+            freq_params_gtr10z_from_cellphy,
+            rate_params_gtr10z_from_cellphy,
+            nll_gtr10z_from_cellphy,
+            freq_params_gtr10_from_cellphy,
+            rate_params_gtr10_from_cellphy,
+            nll_gtr10_from_cellphy,
         )
+
+
+def print_states(
+    freq_params_unphased,
+    rate_params_unphased,
+    nll_unphased,
+    freq_params_cellphy,
+    rate_params_cellphy,
+    nll_cellphy,
+    freq_params_gtr10z_from_unphased,
+    rate_params_gtr10z_from_unphased,
+    nll_gtr10z_from_unphased,
+    freq_params_gtr10_from_unphased,
+    rate_params_gtr10_from_unphased,
+    nll_gtr10_from_unphased,
+    freq_params_gtr10z_from_cellphy,
+    rate_params_gtr10z_from_cellphy,
+    nll_gtr10z_from_cellphy,
+    freq_params_gtr10_from_cellphy,
+    rate_params_gtr10_from_cellphy,
+    nll_gtr10_from_cellphy,
+):
+    data = {
+        "nll_unphased": nll_unphased,
+        "nll_gtr10z_from_unphased": nll_gtr10z_from_unphased,
+        "nll_gtr10_from_unphased": nll_gtr10_from_unphased,
+        "nll_cellphy": nll_cellphy,
+        "nll_gtr10z_from_cellphy": nll_gtr10z_from_cellphy,
+        "nll_gtr10_from_cellphy": nll_gtr10_from_cellphy,
+        **{"unphased S_" + str(i): s for i, s in enumerate(rate_params_unphased)},
+        **{
+            "gtr10z_from_unphased S_" + str(i): s
+            for i, s in enumerate(rate_params_gtr10z_from_unphased)
+        },
+        **{
+            "gtr10_from_unphased S_" + str(i): s
+            for i, s in enumerate(rate_params_gtr10_from_unphased)
+        },
+        **{"cellphy S_" + str(i): s for i, s in enumerate(rate_params_cellphy)},
+        **{
+            "gtr10z_from_cellphy S_" + str(i): s
+            for i, s in enumerate(rate_params_gtr10z_from_cellphy)
+        },
+        **{
+            "gtr10_from_cellphy S_" + str(i): s
+            for i, s in enumerate(rate_params_gtr10_from_cellphy)
+        },
+        **{"unphased pi_" + str(i): s for i, s in enumerate(freq_params_unphased)},
+        **{
+            "gtr10z_from_unphased pi_" + str(i): s
+            for i, s in enumerate(freq_params_gtr10z_from_unphased)
+        },
+        **{
+            "gtr10_from_unphased pi_" + str(i): s
+            for i, s in enumerate(freq_params_gtr10_from_unphased)
+        },
+        **{"cellphy pi_" + str(i): s for i, s in enumerate(freq_params_cellphy)},
+        **{
+            "gtr10z_from_cellphy pi_" + str(i): s
+            for i, s in enumerate(freq_params_gtr10z_from_cellphy)
+        },
+        **{
+            "gtr10_from_cellphy pi_" + str(i): s
+            for i, s in enumerate(freq_params_gtr10_from_cellphy)
+        },
+    }
+    print(",".join(data.keys()))
+    print(",".join(map(str, data.values())), flush=True)
