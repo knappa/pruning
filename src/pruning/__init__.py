@@ -1,6 +1,7 @@
 def main_cli():
     import argparse
     import functools
+    import itertools
     import os.path
     import sys
     from collections import defaultdict
@@ -446,8 +447,28 @@ def main_cli():
     )
 
     with open(opt.output + ".csv", "w") as file:
-        file.write("nll\n")
-        file.write(f"{nll}\n")
+        file.write("nll")
+        # noinspection PyUnreachableCode
+        match opt.model:
+            case "DNA" | "PHASED_DNA4":
+                file.write(",pi_a,pi_c,pi_g,pi_t")
+            case "UNPHASED_DNA" | "CELLPHY" | "GTR10Z" | "GTR10":
+                file.write(",pi_aa,pi_cc,pi_gg,pi_tt,pi_ac,pi_ag,pi_at,pi_cg,pi_ct,pi_gt")
+            case "PHASED_DNA16" | "PHASED_DNA16_MP":
+                file.write(
+                    ","
+                    + ",".join(
+                        f"pi_{x}{y}" for x, y in itertools.product(["a", "c", "g", "t"], repeat=2)
+                    )
+                )
+            case _:
+                raise NotImplementedError("Missing a model?")
+        file.write("," + ",".join(f"s_{i}" for i in range(len(rate_params))))
+        file.write("\n")
+
+        file.write(f"{nll}")
+        file.write("," + ",".join(map(str, freq_params)))
+        file.write("," + ",".join(map(str, rate_params)))
 
     #
     #     if freq_params_option == "OPTIMIZE":
