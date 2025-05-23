@@ -61,7 +61,7 @@ def main_cli():
 
     if hasattr(sys, "ps1"):
         opt = parser.parse_args(
-            "--seqs test/test-diploid.phy --tree test/test-diploid.nwk --log ".split()
+            "--seqs test-data/test-data-diploid.phy --tree test-data/test-data-diploid.nwk --log ".split()
         )
     else:
         opt = parser.parse_args()
