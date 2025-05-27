@@ -1,11 +1,225 @@
 #!/usr/bin/env python3
-
-import csv
 import argparse
+import csv
+import sys
 
-parser = argparse.ArgumentParser(
-    description="Compute log likelihood using the pruning algorithm"
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib import colors
+from pruning.matrices import (
+    Qsym_cellphy10,
+    Qsym_gtr4,
+    Qsym_gtr10,
+    Qsym_gtr10z,
+    Qsym_GTRsq,
+    Qsym_GTRxGTR,
+    Qsym_unphased,
+)
+
+parser = argparse.ArgumentParser(description="Generate visualization of Q matrices")
+parser.add_argument("--csvs", type=str, required=True, help="data, comma delimited")
+parser.add_argument(
+    "--models",
+    type=str,
+    required=True,
+    help="Datatype, comma delimited",
+    # choices=[
+    #     "DNA",
+    #     "PHASED_DNA16",
+    #     "PHASED_DNA16_MP",
+    #     "UNPHASED_DNA",
+    #     "CELLPHY",
+    #     "GTR10Z",
+    #     "GTR10",
+    # ],
 )
 parser.add_argument(
-    "--seqs", type=str, required=True, help="sequence alignments in phylip format"
+    "--true-model",
+    type=str,
+    required=False,
+    choices=[
+        "DNA",
+        "PHASED_DNA16",
+        "PHASED_DNA16_MP",
+        "UNPHASED_DNA",
+        "CELLPHY",
+        "GTR10Z",
+        "GTR10",
+    ],
 )
+parser.add_argument(
+    "--true-pis",
+    type=float,
+    nargs="+",
+    required=False,
+)
+parser.add_argument(
+    "--true-params",
+    type=float,
+    nargs="+",
+    required=False,
+)
+parser.add_argument("--out", type=str, required=True, help="output prefix")
+
+if hasattr(sys, "ps1"):
+    opt = parser.parse_args(
+        "--csvs /home/knappa/pruning/data/diploid-sites-1000-seq-err-0.00-ado-0.00/"
+        "combined-fit-stats-reconstructed-tree-unphased.csv,"
+        "/home/knappa/pruning/data/diploid-sites-1000-seq-err-0.00-ado-0.00/"
+        "combined-fit-stats-reconstructed-tree-cellphy.csv,"
+        "/home/knappa/pruning/data/diploid-sites-1000-seq-err-0.00-ado-0.00/"
+        "combined-fit-stats-reconstructed-tree-gtr10z.csv,"
+        "/home/knappa/pruning/data/diploid-sites-1000-seq-err-0.00-ado-0.00/"
+        "combined-fit-stats-reconstructed-tree-gtr10.csv "
+        "--out /home/knappa/pruning/data/diploid-sites-1000-seq-err-0.00-ado-0.00/test "
+        "--models UNPHASED_DNA,CELLPHY,GTR10Z,GTR10 "
+        "--true-model UNPHASED_DNA "
+        "--true-pis 0.085849 0.04 0.042849 0.09 0.1172 0.121302 0.1758 0.0828 0.12 0.1242 "
+        "--true-params 0.839 0.112 2.239 0.600 3.119 0.560".split()
+    )
+else:
+    opt = parser.parse_args()
+
+# --base_freqs 0.293 0.2 0.207 0.3 \
+# --mut_matrix \
+# 0.000 0.839 0.112 2.239 \
+# 0.839 0.000 0.600 3.119 \
+# 0.112 0.600 0.000 0.560 \
+# 2.239 3.119 0.560 0.000;
+
+
+assert hasattr(opt, "true_model") == hasattr(opt, "true_pis") == hasattr(opt, "true_params")
+
+use_true_model = hasattr(opt, "true_model") and opt.true_model is not None
+
+
+def get_data(filename):
+    raw_data = []
+    with open(filename, "r") as csv_file:
+        csvreader = csv.reader(csv_file)
+        # noinspection PyUnusedLocal
+        headers = next(csvreader)
+        for line in csvreader:
+            raw_data.append(list(map(float, line)))
+    data = np.array(raw_data)
+    return data
+
+
+def get_Qs(data, model):
+    num_examples = data.shape[0]
+    # noinspection PyUnreachableCode
+    match model:
+        case "DNA":
+            pis = data[:, 1:5]
+            Ss = data[:, 5:]
+            Q_function = Qsym_gtr4
+        case "PHASED_DNA16":
+            pis = data[:, 1:17]
+            Ss = data[:, 17:]
+            Q_function = Qsym_GTRsq
+        case "PHASED_DNA16_MP":
+            pis = data[:, 1:17]
+            Ss = data[:, 17:]
+            Q_function = Qsym_GTRxGTR
+        case "UNPHASED_DNA":
+            pis = data[:, 1:11]
+            Ss = data[:, 11:]
+            Q_function = Qsym_unphased
+        case "CELLPHY":
+            pis = data[:, 1:11]
+            Ss = data[:, 11:]
+            Q_function = Qsym_cellphy10
+        case "GTR10Z":
+            pis = data[:, 1:11]
+            Ss = data[:, 11:]
+            Q_function = Qsym_gtr10z
+        case "GTR10":
+            pis = data[:, 1:11]
+            Ss = data[:, 11:]
+            Q_function = Qsym_gtr10
+        case _:
+            assert False
+
+    Qs = np.array(
+        [
+            np.diag(1 / np.sqrt(pis[ex_idx, :]))
+            @ Q_function(pis[ex_idx, :], Ss[ex_idx, :])
+            @ np.diag(np.sqrt(pis[ex_idx, :]))
+            for ex_idx in range(num_examples)
+        ]
+    )
+    return Qs
+
+
+csv_files = opt.csvs.split(",")
+models = opt.models.split(",")
+
+assert len(csv_files) == len(models)
+
+Qs = []
+for csvfile, model in zip(csv_files, models):
+    Qs.append(get_Qs(get_data(csvfile), model))
+
+mean_ratio = np.mean([Q.shape[0] / np.prod(Q.shape[1:]) for Q in Qs])
+
+
+model_text = {
+    "DNA": "DNA",
+    "PHASED_DNA16": "Phased DNA",
+    "PHASED_DNA16_MP": "Phased DNA M/P rates vary",
+    "UNPHASED_DNA": "Unphased DNA",
+    "CELLPHY": "Cellphy",
+    "GTR10Z": "GTR10Z",
+    "GTR10": "GTR10",
+}
+
+n_states = {
+    "DNA": 4,
+    "PHASED_DNA16": 16,
+    "PHASED_DNA16_MP": 16,
+    "UNPHASED_DNA": 10,
+    "CELLPHY": 10,
+    "GTR10Z": 10,
+    "GTR10": 10,
+}
+
+
+width_mult = 1.0 if 6 * len(Qs) < 8.5 else 8.5/(6*len(Qs))
+# noinspection PyTypeChecker
+fig, axs = plt.subplots(1, len(Qs), figsize=(6 * len(Qs)* width_mult, 6 * mean_ratio*width_mult), layout="constrained")
+
+if use_true_model:
+    true_Q = get_Qs(
+        np.concatenate(([0], opt.true_pis, opt.true_params))[np.newaxis, :], opt.true_model
+    )
+
+    plot_max = 0.0
+    for Q in Qs:
+        plot_max = np.maximum(plot_max, np.max(np.abs(Q - true_Q)))
+    norm = colors.Normalize(vmin=0.0, vmax=plot_max)
+
+    images = []
+    for ax, Q, model in zip(axs, Qs, models):
+        images.append(ax.imshow(np.abs((Q - true_Q).reshape(Q.shape[0], -1)), norm=norm))
+        ax.title.set_text(model_text[model])
+        ax.set_xticks(np.arange(0, np.prod(Q.shape[1:]), n_states[model]))
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=-45)
+        ax.set_yticks([])
+
+    fig.colorbar(images[-1], ax=axs, shrink=0.75)
+
+
+else:
+    plot_max = 0.0
+    for Q in Qs:
+        plot_max = np.maximum(plot_max, np.max(np.abs(Q)))
+    norm = colors.Normalize(vmin=0.0, vmax=plot_max)
+
+    images = []
+    for ax, Q, model in zip(axs, Qs, models):
+        images.append(ax.imshow(np.abs(Q.reshape(Q.shape[0], -1)), norm=norm))
+        ax.title.set_text(model_text[model])
+        ax.set_xticks(np.arange(0, np.prod(Q.shape[1:]), n_states[model]))
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=-45)
+
+    fig.colorbar(images[-1], ax=axs, shrink=0.75)

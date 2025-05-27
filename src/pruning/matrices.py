@@ -1695,6 +1695,43 @@ def make_GTR_prob_model(pis, gtr_params, *, vec=False):
             )
 
 
+def Qsym_unphased(pi10s, s_is):
+    pi_a, pi_c, pi_g, pi_t = pi10s_to_pi4s(pi10s)
+    pi10s_unphased = pi4s_to_unphased_pi10s(np.array([pi_a, pi_c, pi_g, pi_t]))
+    s_ac, s_ag, s_at, s_cg, s_ct, s_gt = np.abs(s_is)
+
+    model_params10 = np.array(
+        [
+            s_ac / pi_a,
+            s_ag / pi_a,
+            s_at / pi_a,
+            s_ac / pi_c,
+            s_cg / pi_c,
+            s_ct / pi_c,
+            s_ag / pi_g,
+            s_cg / pi_g,
+            s_gt / pi_g,
+            s_at / pi_t,
+            s_ct / pi_t,
+            s_gt / pi_t,
+            s_cg / (2 * pi_a),
+            s_ct / (2 * pi_a),
+            s_ag / (2 * pi_c),
+            s_at / (2 * pi_c),
+            s_gt / (2 * pi_a),
+            s_ac / (2 * pi_g),
+            s_at / (2 * pi_g),
+            s_ac / (2 * pi_t),
+            s_ag / (2 * pi_t),
+            s_gt / (2 * pi_c),
+            s_ct / (2 * pi_g),
+            s_cg / (2 * pi_t),
+        ]
+    )
+
+    return Qsym_gtr10z(pi10s_unphased, model_params10)
+
+
 def make_unphased_GTRsq_prob_model(pis10, rate_params, *, vec=False):
     pi_a, pi_c, pi_g, pi_t = pi10s_to_pi4s(pis10)
     # print(f"{pi_a=} {pi_c=} {pi_g=} {pi_t=}")
