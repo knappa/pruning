@@ -7,7 +7,11 @@ import sys
 import numpy as np
 
 files = sorted(
-    [file for file in os.listdir("..") if file.endswith(".csv") and file.startswith(sys.argv[1] + '-')]
+    [
+        file
+        for file in os.listdir("..")
+        if file.endswith(".csv") and file.startswith(sys.argv[1] + "-")
+    ]
 )
 with open(files[0], "r") as file:
     headers = next(file).strip().split(",")

@@ -79,7 +79,7 @@ def main_cli():
             "CELLPHY",
             "GTR10Z",
             "GTR10",
-            "SIEVE",
+            # "SIEVE",
         ],
     )
 
