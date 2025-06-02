@@ -9,8 +9,9 @@ library(ape)
 library(TreeDist)
 library(stringr)
 library(phangorn)
+library(tidytree)
 
-models <- c("phased4", "phased16", "phased16mp", "unphased", "cellphy", "cellphy-pi", "gtr10z", "gtr10")
+models <- c("4state", "phased16", "phased16mp", "unphased", "cellphy", "gtr10z", "gtr10")
 
 df <- data.frame(matrix(
   ncol = 10,

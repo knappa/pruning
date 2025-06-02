@@ -10,7 +10,7 @@ library(TreeDist)
 library(stringr)
 library(phangorn)
 
-models <- c("4state", "16state", "16state_mp", "unphased", "cellphy", "gtr10z", "gtr10")
+models <- c("4state", "phased16", "phased16mp", "unphased", "cellphy", "gtr10z", "gtr10")
 
 df <- data.frame(matrix(
   ncol = 10,
@@ -30,9 +30,9 @@ for (model.idx in seq_along(models)) {
     tree <- read.tree(
       paste(directory,
         "/reconstructed-tree-",
-        str_pad(item - 1, 3, pad = "0"),
-        "-",
         models[model.idx],
+        "-",
+        str_pad(item - 1, 3, pad = "0"),
         ".nwk",
         sep = ""
       )
@@ -66,6 +66,6 @@ for (model.idx in seq_along(models)) {
 
 write.csv(df, paste(
   directory,
-  "/tree-stats-output.csv",
+  "/tree-stats-boost-output.csv",
   sep = ""
 ), row.names = FALSE)
