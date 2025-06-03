@@ -1676,8 +1676,8 @@ def make_GTR_prob_model(pis, gtr_params, *, vec=False):
     try:
         evals, sym_evecs = np.linalg.eigh(sym_Q)
 
-        left = sym_evecs * np.sqrt(pis)[:, None]
-        right = sym_evecs.T / np.sqrt(pis)
+        left = sym_evecs / np.sqrt(pis)[:, None]
+        right = sym_evecs.T * np.sqrt(pis)
 
         if vec:
             return lambda t: prob_model_helper_vec(t, left, right, evals)
