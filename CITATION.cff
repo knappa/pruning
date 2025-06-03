@@ -1,0 +1,29 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: pruning
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Adam
+    family-names: Knapp
+    email: adam.knapp@medicine.ufl.edu
+    affiliation: University of Florida
+    orcid: 'https://orcid.org/0000-0002-5719-6003'
+  - given-names: Julia
+    family-names: Chifman
+    orcid: 'https://orcid.org/0000-0002-7520-0627'
+    affiliation: American University
+    email: chifman@american.edu
+repository-code: 'https://github.com/knappa/pruning'
+abstract: >-
+  Implementation of Felsenstein's tree-pruning algorithm to
+  estimate the likelihood of a phylogenetic tree based on
+  sequencing data for the purpose of exploring differences
+  between rate matrix models.
+keywords:
+  - phylogenetics
+license: Apache-2.0
