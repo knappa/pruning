@@ -7,9 +7,16 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import colors
-from pruning.matrices import (Qsym_cellphy10, Qsym_gtr4, Qsym_gtr10,
-                              Qsym_gtr10z, Qsym_GTRsq, Qsym_GTRxGTR,
-                              Qsym_unphased, gtr10_rate)
+from pruning.matrices import (
+    Qsym_cellphy10,
+    Qsym_gtr4,
+    Qsym_gtr10,
+    Qsym_gtr10z,
+    Qsym_GTRsq,
+    Qsym_GTRxGTR,
+    Qsym_unphased,
+    gtr10_rate,
+)
 
 parser = argparse.ArgumentParser(description="Generate visualization of Q matrices")
 parser.add_argument("--csvs", type=str, required=True, help="data, comma delimited")

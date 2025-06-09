@@ -11,7 +11,8 @@ library(stringr)
 library(phangorn)
 library(tidytree)
 
-models <- c("4state", "phased16", "phased16mp", "unphased", "cellphy", "gtr10z", "gtr10")
+#models <- c("4state", "phased16", "phased16mp", "unphased", "cellphy", "gtr10z", "gtr10")
+models <- c("4state", "phased16", "unphased", "cellphy", "gtr10z", "gtr10")
 
 df <- data.frame(matrix(
   ncol = 10,
@@ -44,6 +45,15 @@ for (model.idx in seq_along(models)) {
         sep = ""
       )
     )
+
+    #########################################
+    # rescale branch lengths of true tree
+    x <- as_tibble(true_tree)
+    x['branch.length'] <- x['branch.length'] * 1.784008614285714
+    true_tree <- as.phylo(x)
+
+    #########################################
+    # distances
 
     df[(model.idx - 1) * count + item, 1] <- paste(
       models[model.idx],

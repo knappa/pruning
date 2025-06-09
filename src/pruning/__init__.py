@@ -44,7 +44,6 @@ def main_cli():
     from pruning.path_constraints import make_path_constraints
     from pruning.score_function_gen import compute_score_function, neg_log_likelihood_prototype
     from pruning.util import (
-        CallbackIR,
         CallbackParam,
         kahan_dot,
         log_dot,
@@ -156,7 +155,10 @@ def main_cli():
 
     if hasattr(sys, "ps1"):
         opt = parser.parse_args(
-            "--seqs test-data/test-data-diploid.phy --tree test-data/test-data-diploid.nwk --model UNPHASED_DNA --log ".split()
+            "--seqs test-data/test-data-diploid.phy "
+            "--tree test-data/test-data-diploid.nwk "
+            "--model UNPHASED_DNA "
+            "--log ".split()
         )
     else:
         opt = parser.parse_args()
@@ -390,16 +392,15 @@ def main_cli():
         log_freq_params = np.clip(np.nan_to_num(np.log(freq_params)), -1e100, 0.0)
 
     rate_params_init = np.ones(num_rate_params)
-    if final_rp_norm:
-        # rate_params /= rate_params[-1]
-        pass
-    else:
+    if not final_rp_norm:
         rate_params_init = rate_param_cleanup(
             x=rate_params_init,
             log_freq_params=log_freq_params,
             ploidy=ploidy,
             rate_constraint=rate_constraint,
         )
+    # if final_rp_norm, we would do the below, but we just initialized this to 1. so the update is omitted
+    # rate_params_init /= rate_params_init[-1]
 
     ##########################################################################################
     # jointly optimize GTR params and branch lens using neg-log likelihood

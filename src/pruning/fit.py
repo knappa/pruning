@@ -28,7 +28,26 @@ def fit_model(
     ploidy,
     final_rp_norm: bool,
     log: bool = True,
+    n_split_iters: int = 2,
+    min_branch_length: float = 1e-7,
+    min_rate_param: float = 1e-7,
 ):
+    """
+    Fit the model.
+
+    :param branch_lengths:
+    :param rate_params:
+    :param log_freq_params:
+    :param neg_log_likelihood:
+    :param rate_constraint:
+    :param ploidy:
+    :param final_rp_norm:
+    :param log:
+    :param n_split_iters:
+    :param min_branch_length: TODO questionable
+    :param min_rate_param: TODO questionable
+    :return:
+    """
     import functools
 
     import numpy as np
@@ -66,52 +85,65 @@ def fit_model(
 
     best_nll = np.inf
 
+    # enforce constraints
+    rate_params = np.clip(np.nan_to_num(rate_params), min_rate_param, np.inf)
+    branch_lengths[0] = 0.0
+    branch_lengths[1:] = np.clip(np.nan_to_num(branch_lengths[1:]), min_branch_length, np.inf)
+
     # alternate a few times between optimizing the branch lengths and the rate parameters.
-    for _ in range(3):
+    for _ in range(n_split_iters):
 
-        # optimize branch lengths
-        res = minimize(
-            branch_length_objective,
-            branch_lengths,
-            args=(log_freq_params, rate_params),
-            method="L-BFGS-B",
-            bounds=[(0.0, np.inf)] + [(1e-8, np.inf)] * (num_branch_lens - 1),
-            callback=CallbackParam() if log else None,
-            options=solver_options["L-BFGS-B"],
-        )
-        best_nll = np.minimum(best_nll, res.fun)
-        if log:
-            print(res)
-
-        # belt and suspenders for the constraint (avoid -1e-big type bounds violations)
-        branch_lengths = np.clip(res.x, 0.0, np.inf)
-
-        # optimize rate parameters
-        res = minimize(
-            param_objective,
-            rate_params,
-            args=(
-                log_freq_params,
+        try:
+            # optimize branch lengths
+            res = minimize(
+                branch_length_objective,
                 branch_lengths,
-            ),
-            method="L-BFGS-B",
-            bounds=[(1e-10, np.inf)] * num_rate_params,
-            callback=CallbackParam() if log else None,
-            options=solver_options["L-BFGS-B"],
-        )
-        best_nll = np.minimum(best_nll, res.fun)
-        if log:
-            print(res)
+                args=(log_freq_params, rate_params),
+                method="L-BFGS-B",
+                bounds=[(0.0, max(min_branch_length / 2, 1e-10))]
+                + [(min_branch_length, np.inf)] * (num_branch_lens - 1),
+                callback=CallbackParam(print_period=10) if log else None,
+                options=solver_options["L-BFGS-B"],
+            )
+            best_nll = np.minimum(best_nll, res.fun)
+            if log:
+                print(res)
 
-        rate_params = np.clip(res.x, 0.0, np.inf)
+            # belt and suspenders for the constraint
+            branch_lengths[0] = 0.0
+            branch_lengths[1:] = np.clip(np.nan_to_num(res.x[1:]), min_branch_length, np.inf)
+        except ValueError:
+            pass
 
-        rate_params = scale_params(
-            rate_params=rate_params,
-            log_freq_params=log_freq_params,
-            ploidy=ploidy,
-            rate_constraint=rate_constraint,
-            final_rp_norm=final_rp_norm,
-        )
+        try:
+            # optimize rate parameters
+            res = minimize(
+                param_objective,
+                rate_params,
+                args=(
+                    log_freq_params,
+                    branch_lengths,
+                ),
+                method="L-BFGS-B",
+                bounds=[(min_rate_param, np.inf)] * num_rate_params,
+                callback=CallbackParam(print_period=10) if log else None,
+                options=solver_options["L-BFGS-B"],
+            )
+            best_nll = np.minimum(best_nll, res.fun)
+            if log:
+                print(res)
+
+            rate_params = np.clip(np.nan_to_num(res.x), min_rate_param, np.inf)
+
+            rate_params = scale_params(
+                rate_params=rate_params,
+                log_freq_params=log_freq_params,
+                ploidy=ploidy,
+                rate_constraint=rate_constraint,
+                final_rp_norm=final_rp_norm,
+            )
+        except ValueError:
+            pass
 
     # Joint (params + branch lengths) optimization
     # optimize everything but the state frequencies
@@ -123,29 +155,37 @@ def fit_model(
         ploidy=ploidy,
         final_rp_norm=final_rp_norm,
     )
-    res = minimize(
-        params_distances_objective,
-        np.concatenate((rate_params, branch_lengths)),
-        args=(log_freq_params,),
-        method="L-BFGS-B",
-        bounds=[(0.0, np.inf)] * (num_rate_params + num_branch_lens),
-        callback=CallbackParam() if log else None,
-        options=solver_options["L-BFGS-B"],
-    )
-    best_nll = np.minimum(best_nll, res.fun)
-    if log:
-        print(res)
+    try:
+        res = minimize(
+            params_distances_objective,
+            np.concatenate((rate_params, branch_lengths)),
+            args=(log_freq_params,),
+            method="L-BFGS-B",
+            bounds=[(min_rate_param, np.inf)] * num_rate_params
+            + [(0.0, max(min_branch_length / 2, 1e-10))]
+            + [(min_branch_length, np.inf)] * (num_branch_lens - 1),
+            callback=CallbackParam(print_period=10) if log else None,
+            options=solver_options["L-BFGS-B"],
+        )
+        best_nll = np.minimum(best_nll, res.fun)
+        if log:
+            print(res)
 
-    rate_params = res.x[:num_rate_params]
-    branch_lengths = np.clip(res.x[num_rate_params:], 0.0, np.inf)
+        rate_params = np.clip(np.nan_to_num(res.x[:num_rate_params]), min_rate_param, np.inf)
+        branch_lengths[0] = 0.0
+        branch_lengths[1:] = np.clip(
+            np.nan_to_num(res.x[num_rate_params + 1 :]), min_branch_length, np.inf
+        )
 
-    rate_params = scale_params(
-        rate_params=rate_params,
-        log_freq_params=log_freq_params,
-        ploidy=ploidy,
-        rate_constraint=rate_constraint,
-        final_rp_norm=final_rp_norm,
-    )
+        rate_params = scale_params(
+            rate_params=rate_params,
+            log_freq_params=log_freq_params,
+            ploidy=ploidy,
+            rate_constraint=rate_constraint,
+            final_rp_norm=final_rp_norm,
+        )
+    except ValueError:
+        pass
 
     # final cleanup optimization with boosted constraint weights
     params_distances_objective = functools.partial(
@@ -156,16 +196,19 @@ def fit_model(
         params_distances_objective,
         np.concatenate((rate_params, branch_lengths)),
         args=(log_freq_params,),
-        method="L-BFGS-B",
-        bounds=[(0.0, np.inf)] * (num_rate_params + num_branch_lens),
-        callback=CallbackParam() if log else None,
-        options=solver_options["L-BFGS-B"],
+        method="Nelder-Mead",
+        bounds=[(min_rate_param, np.inf)] * num_rate_params
+        + [(0.0, max(min_branch_length / 2, 1e-10))]
+        + [(min_branch_length, np.inf)] * (num_branch_lens - 1),
+        callback=CallbackParam(print_period=100) if log else None,
+        options=solver_options["Nelder-Mead"],
     )
     if log:
         print(res)
 
-    rate_params = res.x[:num_rate_params]
-    branch_lengths = np.clip(res.x[num_rate_params:], 0.0, np.inf)
+    rate_params = np.clip(np.nan_to_num(res.x[:num_rate_params]), min_rate_param, np.inf)
+    branch_lengths[0] = 0.0
+    branch_lengths[1:] = np.clip(res.x[num_rate_params + 1 :], 0.0, np.inf)
 
     rate_params = scale_params(
         rate_params=rate_params,
@@ -223,7 +266,15 @@ def scale_params(
 
 
 def compute_initial_tree_distance_estimates(
-    *, node_indices, num_tree_nodes, opt, pis, sequences, taxa, true_tree
+    *,
+    node_indices,
+    num_tree_nodes,
+    opt,
+    pis,
+    sequences,
+    taxa,
+    true_tree,
+    min_branch_length: float = 1e-7,
 ):
     import functools
     import itertools
@@ -233,7 +284,7 @@ def compute_initial_tree_distance_estimates(
 
     from pruning.distance_functions import diploid_dna_sequence_distance
     from pruning.path_constraints import make_path_constraints
-    from pruning.util import CallbackParam
+    from pruning.util import CallbackParam, solver_options
 
     sequence_distance = functools.partial(diploid_dna_sequence_distance, pis=pis)
 
@@ -271,14 +322,18 @@ def compute_initial_tree_distance_estimates(
     res = minimize(
         branch_length_estimate_objective,
         np.ones(num_tree_nodes, dtype=np.float64),
-        bounds=[(0.0, None)] + [(1e-10, None)] * (num_tree_nodes - 1),
-        callback=CallbackParam() if opt.log else None,
+        bounds=[(0.0, max(min_branch_length / 2, 1e-10))]
+        + [(min_branch_length, np.inf)] * (num_tree_nodes - 1),
+        callback=CallbackParam(print_period=10) if opt.log else None,
+        method="L-BFGS-B",
+        options=solver_options["L-BFGS-B-Lite"],
     )
-    if not res.success:
-        print("Error in optimization, continuing anyway", flush=True)
+    if opt.log and not res.success:
+        print("Optimization did not terminate, continuing anyway", flush=True)
 
     # belt and suspenders for the constraint (avoid -1e-big type bounds violations)
-    tree_distances = np.maximum(0.0, res.x)
+    tree_distances = np.zeros_like(res.x, dtype=np.float64)
+    tree_distances[1:] = np.maximum(min_branch_length, np.nan_to_num(res.x[1:]))
 
     return tree_distances
 

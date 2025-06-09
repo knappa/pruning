@@ -25,7 +25,7 @@ def kahan_dot(v: np.ndarray, w: np.ndarray):
     return accumulator
 
 
-def np_full_print(nparray):
+def np_full_print(nparray, flush=False):
     from shutil import get_terminal_size
 
     from numpy import inf, printoptions
@@ -36,26 +36,30 @@ def np_full_print(nparray):
         linewidth=get_terminal_size((80, 20)).columns,
         suppress=True,
     ):
-        print(nparray)
+        print(nparray, flush=flush)
 
 
 class CallbackParam:
     num_func_evals: int = 0
 
+    def __init__(self, print_period: int = 1):
+        self.print_period = print_period
+
     def __call__(self, x):
         self.num_func_evals += 1
-        print(self.num_func_evals, flush=True)
-        np_full_print(x)
+        if self.num_func_evals % self.print_period == 0:
+            print(self.num_func_evals)
+            np_full_print(x, flush=True)
 
 
-class CallbackIR:
-    num_func_evals: int = 0
-
-    def __call__(self, intermediate_result):
-        self.num_func_evals += 1
-        print(self.num_func_evals, flush=True)
-        print(intermediate_result, flush=True)
-        np_full_print(intermediate_result.x)
+# class CallbackIR:
+#     num_func_evals: int = 0
+#
+#     def __call__(self, intermediate_result):
+#         self.num_func_evals += 1
+#         print(self.num_func_evals, flush=True)
+#         print(intermediate_result, flush=True)
+#         np_full_print(intermediate_result.x)
 
 
 def print_dna_params(s_est, pis_est):
@@ -225,6 +229,7 @@ def print_stats(*, rate_params, freq_params, neg_l, tree_distances, true_branch_
     print(f"neg log likelihood: {neg_l}")
     print()
 
+    # noinspection PyUnreachableCode
     match model:
         case "DNA" | "PHASED_DNA4":
             print_dna_params(rate_params, freq_params)
@@ -284,6 +289,7 @@ def rate_param_cleanup(*, x, log_freq_params, ploidy, rate_constraint):
 # solver options
 
 solver_options = defaultdict(dict)
-solver_options["L-BFGS-B"] = {"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10}
+solver_options["L-BFGS-B"] = {"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-8}
+solver_options["L-BFGS-B-Lite"] = {"maxiter": 100, "maxfun": 10_000, "ftol": 1e-4}
 solver_options["Powell"] = {"maxiter": 1000, "ftol": 1e-10}
-solver_options["Nelder-Mead"] = {"adaptive": True, "fatol": 0.1}
+solver_options["Nelder-Mead"] = {"adaptive": True, "fatol": 1e-8, "xatol": 1e-8}
