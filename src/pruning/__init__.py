@@ -68,7 +68,7 @@ def main_cli():
     parser.add_argument(
         "--model",
         type=str,
-        default="DNA",
+        required=True,
         help="Datatype for sequence",
         choices=[
             "DNA",

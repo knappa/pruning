@@ -185,7 +185,8 @@ def fit_model(
 
         if log:
             print(
-                "optimizing joint rate parameters and branch lengths from likelihood function " + options,
+                "optimizing joint rate parameters and branch lengths from likelihood function "
+                + options,
                 flush=True,
             )
         # local search in joint rate parameter + branch length space
