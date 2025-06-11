@@ -4,8 +4,8 @@ cd ~/pruning/ || exit
 
 source venv/bin/activate
 
-PARENT_DIR=~/pruning/data/std-cellcoal
-NJOBS=19
+PARENT_DIR=~/pruning/data
+NJOBS=22
 SEQ_ERR=0.00
 ADO=0.00
 

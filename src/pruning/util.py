@@ -288,8 +288,35 @@ def rate_param_cleanup(*, x, log_freq_params, ploidy, rate_constraint):
 ################################################################################
 # solver options
 
+# L-BFGS-B defaults:
+# m=10 maximum number of variable metric corrections
+# factr=1e7 Typical values for `factr` are:
+#     1e12 for low accuracy;
+#     1e7 for moderate accuracy;
+#     10.0 for extremely high accuracy.
+# pgtol=1e-5 projected gradient tolerance
+# epsilon=1e-8 Step size used for numerically calculating the gradient
+# maxfun=15000 Maximum number of function evaluations.
+# maxiter=15000 Maximum number of iterations.
+# maxls=20 Maximum number of line search steps (per iteration)
+
+# since factr isn't directly exposed, it is computed from:
+# 'ftol': factr * np.finfo(float).eps
+# so
+# low accuracy ftol = 0.0002220446049250313
+# med accuracy ftol = 2.220446049250313e-09
+# high accuracy ftol = 2.220446049250313e-15
+
 solver_options = defaultdict(dict)
-solver_options["L-BFGS-B"] = {"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-8}
-solver_options["L-BFGS-B-Lite"] = {"maxiter": 100, "maxfun": 10_000, "ftol": 1e-4}
-solver_options["Powell"] = {"maxiter": 1000, "ftol": 1e-10}
-solver_options["Nelder-Mead"] = {"adaptive": True, "fatol": 1e-8, "xatol": 1e-8}
+# solver_options["L-BFGS-B"] = {"maxiter": 20_000, "maxfun": 20_000, "ftol": 1e-8}
+# solver_options["L-BFGS-B-Lite"] = {"maxiter": 10_000, "maxfun": 10_000, "ftol": 1e-1 }
+solver_options["L-BFGS-B"] = {"ftol": 1e7 * float(np.finfo(float).eps)}
+solver_options["L-BFGS-B-Lite"] = {"ftol": 1e12 * float(np.finfo(float).eps)}
+solver_options["L-BFGS-B-Medium"] = {"ftol": 1e7 * float(np.finfo(float).eps)}
+solver_options["L-BFGS-B-Heavy"] = {"ftol": 1e2 * float(np.finfo(float).eps)}
+solver_options["Powell"] = {"maxiter": 1000, "ftol": 1e2 * float(np.finfo(float).eps)}
+solver_options["Nelder-Mead"] = {
+    "adaptive": True,
+    "fatol": 1e2 * float(np.finfo(float).eps),
+    "xatol": 1e2 * float(np.finfo(float).eps),
+}
