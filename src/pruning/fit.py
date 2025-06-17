@@ -373,9 +373,9 @@ def compute_initial_tree_distance_estimates(
 
             sequence_distance = functools.partial(phased_diploid_sequence_distance, pis=pis)
         case "UNPHASED_DNA":
-            from pruning.distance_functions import phased_diploid_sequence_distance
+            from pruning.distance_functions import unphased_diploid_sequence_distance
 
-            sequence_distance = functools.partial(phased_diploid_sequence_distance, pis=pis)
+            sequence_distance = functools.partial(unphased_diploid_sequence_distance, pis=pis)
         case "CELLPHY":
             from pruning.distance_functions import cellphy_unphased_diploid_sequence_distance
 
