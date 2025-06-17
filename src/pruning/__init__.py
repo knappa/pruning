@@ -163,7 +163,7 @@ def main_cli():
         opt = parser.parse_args()
 
     if opt.log:
-        print(opt)
+        print(opt, flush=True)
 
     if (
         (not opt.overwrite)
@@ -216,14 +216,6 @@ def main_cli():
         freq_params = np.array(opt.fix_freq_params16)
     else:
         freq_params_option = "FROM_SEQ"
-
-    ################################################################################
-    # solver options
-
-    solver_options = defaultdict(dict)
-    solver_options["L-BFGS-B"] = {"maxiter": 1000, "maxfun": 100_000, "ftol": 1e-10}
-    solver_options["Powell"] = {"maxiter": 1000, "ftol": 1e-10}
-    solver_options["Nelder-Mead"] = {"adaptive": True, "fatol": 0.1}
 
     ################################################################################
     # read the true tree
@@ -422,8 +414,6 @@ def main_cli():
         true_tree=true_tree,
         to_stdout=(not hasattr(opt, "output")) or opt.output is None,
     )
-
-
 
     ##########################################################################################
     # jointly optimize GTR params and branch lens using neg-log likelihood
