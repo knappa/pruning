@@ -13,7 +13,6 @@ def main_cli():
         compute_initial_tree_distance_estimates,
         fit_model,
         gtr10z_to_gtr10,
-        read_sequences,
         save_as_newick,
     )
     from pruning.matrices import (
@@ -28,6 +27,7 @@ def main_cli():
         unphased_freq_param_cleanup,
         unphased_rate,
     )
+    from pruning.read_sequences import read_sequences
     from pruning.score_function_gen import compute_score_function, neg_log_likelihood_prototype
     from pruning.util import rate_param_cleanup, rate_param_scale
 
@@ -168,11 +168,12 @@ def main_cli():
     branch_lengths_init = compute_initial_tree_distance_estimates(
         node_indices=node_indices,
         num_tree_nodes=num_tree_nodes,
-        opt=opt,
         pis=seq_pi4,
         sequences=sequences_16state,
         taxa=taxa,
         true_tree=true_tree,
+        model=opt.model,
+        log=opt.log,
     )
 
     if opt.log:

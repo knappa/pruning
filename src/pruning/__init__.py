@@ -13,7 +13,6 @@ def main_cli():
         compute_initial_tree_distance_estimates,
         fit_model,
         print_states,
-        read_sequences,
         save_as_newick,
     )
     from pruning.matrices import (
@@ -42,13 +41,13 @@ def main_cli():
         rates_distances_objective_prototype,
     )
     from pruning.path_constraints import make_path_constraints
+    from pruning.read_sequences import read_sequences
     from pruning.score_function_gen import compute_score_function, neg_log_likelihood_prototype
     from pruning.util import (
         CallbackParam,
         kahan_dot,
         log_dot,
         log_matrix_mult,
-        print_stats,
         rate_param_cleanup,
         rate_param_scale,
     )
@@ -246,13 +245,13 @@ def main_cli():
     # read the sequence data and compute nucleotide frequencies
     (
         nsites,
-        seq_pi4s,
-        seq_pis10,
-        seq_pis16,
+        pi4s_from_seq,
+        pi10s_from_seq,
+        pi16s_from_seq,
         sequences_16state,
         sequences_10state,
         sequences_4state,
-    ) = read_sequences(ambig_char, opt.seqs)
+    ) = read_sequences(ambig_char, opt.seqs, log=opt.log)
 
     if freq_params_option not in {"FIX4", "FIX10", "FIX16"}:
         # if we are deriving this from sequence data, this is the correct value;
@@ -260,13 +259,13 @@ def main_cli():
         # noinspection PyUnreachableCode
         match opt.model:
             case "DNA" | "PHASED_DNA4":
-                freq_params = seq_pi4s
+                freq_params = pi4s_from_seq
             case "UNPHASED_DNA" | "CELLPHY" | "GTR10Z" | "GTR10":
-                freq_params = seq_pis10
+                freq_params = pi10s_from_seq
                 if opt.model == "UNPHASED_DNA":
                     freq_params = unphased_freq_param_cleanup(freq_params)
             case "PHASED_DNA16" | "PHASED_DNA16_MP":
-                freq_params = seq_pis16
+                freq_params = pi16s_from_seq
             case _:
                 raise NotImplementedError("Missing a model?")
 
@@ -306,11 +305,12 @@ def main_cli():
     branch_lengths_init = compute_initial_tree_distance_estimates(
         node_indices=node_indices,
         num_tree_nodes=num_tree_nodes,
-        opt=opt,
-        pis=seq_pi4s,
+        pis=freq_params,
         sequences=sequences,
         taxa=taxa,
         true_tree=true_tree,
+        model=opt.model,
+        log=opt.log,
     )
 
     if opt.log:
@@ -333,7 +333,7 @@ def main_cli():
             num_rate_params = 6
             rate_constraint = gtr4_rate
             if freq_params is None:
-                freq_params = seq_pi4s
+                freq_params = pi4s_from_seq
             prob_model_maker = make_GTR_prob_model
 
         case "PHASED_DNA16":
@@ -341,7 +341,7 @@ def main_cli():
             num_rate_params = 6
             rate_constraint = phased_rate
             if freq_params is None:
-                freq_params = seq_pis16
+                freq_params = pi16s_from_seq
             prob_model_maker = make_GTRsq_prob_model
 
         case "PHASED_DNA16_MP":
@@ -349,7 +349,7 @@ def main_cli():
             num_rate_params = 12
             rate_constraint = phased_mp_rate
             if freq_params is None:
-                freq_params = seq_pis16
+                freq_params = pi16s_from_seq
             prob_model_maker = make_GTRxGTR_prob_model
 
         case "UNPHASED_DNA":
@@ -357,7 +357,7 @@ def main_cli():
             num_rate_params = 6
             rate_constraint = unphased_rate
             if freq_params is None:
-                freq_params = unphased_freq_param_cleanup(seq_pis10)
+                freq_params = unphased_freq_param_cleanup(pi10s_from_seq)
             prob_model_maker = make_unphased_GTRsq_prob_model
 
         case "CELLPHY":
@@ -365,7 +365,7 @@ def main_cli():
             num_rate_params = 6
             rate_constraint = cellphy10_rate
             if freq_params is None:
-                freq_params = seq_pis10
+                freq_params = pi10s_from_seq
             prob_model_maker = make_cellphy_prob_model
 
         case "GTR10Z":
@@ -373,7 +373,7 @@ def main_cli():
             num_rate_params = 24
             rate_constraint = gtr10z_rate
             if freq_params is None:
-                freq_params = seq_pis10
+                freq_params = pi10s_from_seq
             prob_model_maker = make_gtr10z_prob_model
 
         case "GTR10":
@@ -381,7 +381,7 @@ def main_cli():
             num_rate_params = 45
             rate_constraint = gtr10_rate
             if freq_params is None:
-                freq_params = seq_pis10
+                freq_params = pi10s_from_seq
             prob_model_maker = make_gtr10_prob_model
 
         case _:
@@ -401,6 +401,29 @@ def main_cli():
         )
     # if final_rp_norm, we would do the below, but we just initialized this to 1. so the update is omitted
     # rate_params_init /= rate_params_init[-1]
+
+    ##########################################################################################
+    # save tree before likelihood optimization
+    ##########################################################################################
+
+    save_as_newick(
+        branch_lengths=branch_lengths_init,
+        scale=(
+            rate_param_scale(
+                x=rate_params_init,
+                log_freq_params=log_freq_params,
+                ploidy=ploidy,
+                rate_constraint=rate_constraint,
+            )
+            if final_rp_norm
+            else 1
+        ),
+        output=opt.output + "-before-lklyhd-opt.nwk",
+        true_tree=true_tree,
+        to_stdout=(not hasattr(opt, "output")) or opt.output is None,
+    )
+
+
 
     ##########################################################################################
     # jointly optimize GTR params and branch lens using neg-log likelihood

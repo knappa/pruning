@@ -1,5 +1,7 @@
 import numpy as np
 
+from pruning.util import np_full_print
+
 
 def save_as_newick(
     *, branch_lengths: np.ndarray, scale: float, output: str, true_tree, to_stdout: bool = False
@@ -28,8 +30,8 @@ def fit_model(
     ploidy,
     final_rp_norm: bool,
     log: bool = True,
-    min_branch_length: float = 1e-7,
-    min_rate_param: float = 1e-7,
+    min_branch_length: float = 1e-8,
+    min_rate_param: float = 1e-8,
 ):
     """
     Fit the model.
@@ -343,12 +345,13 @@ def compute_initial_tree_distance_estimates(
     *,
     node_indices,
     num_tree_nodes,
-    opt,
     pis,
     sequences,
     taxa,
     true_tree,
-    min_branch_length: float = 1e-7,
+    model,
+    log: bool = False,
+    min_branch_length: float = -np.inf,
 ):
     import functools
     import itertools
@@ -356,11 +359,39 @@ def compute_initial_tree_distance_estimates(
     import numpy as np
     from scipy.optimize import minimize
 
-    from pruning.distance_functions import diploid_dna_sequence_distance
     from pruning.path_constraints import make_path_constraints
     from pruning.util import CallbackParam, solver_options
 
-    sequence_distance = functools.partial(diploid_dna_sequence_distance, pis=pis)
+    # noinspection PyUnreachableCode
+    match model:
+        case "DNA":
+            from pruning.distance_functions import haploid_sequence_distance
+
+            sequence_distance = functools.partial(haploid_sequence_distance, pis=pis)
+        case "PHASED_DNA16" | "PHASED_DNA16_MP":
+            from pruning.distance_functions import phased_diploid_sequence_distance
+
+            sequence_distance = functools.partial(phased_diploid_sequence_distance, pis=pis)
+        case "UNPHASED_DNA":
+            from pruning.distance_functions import phased_diploid_sequence_distance
+
+            sequence_distance = functools.partial(phased_diploid_sequence_distance, pis=pis)
+        case "CELLPHY":
+            from pruning.distance_functions import cellphy_unphased_diploid_sequence_distance
+
+            sequence_distance = functools.partial(
+                cellphy_unphased_diploid_sequence_distance, pis=pis
+            )
+        case "GTR10Z":
+            from pruning.distance_functions import gtr10z_sequence_distance
+
+            sequence_distance = functools.partial(gtr10z_sequence_distance, pis=pis)
+        case "GTR10":
+            from pruning.distance_functions import gtr10_sequence_distance
+
+            sequence_distance = functools.partial(gtr10_sequence_distance, pis=pis)
+        case _:
+            assert False
 
     # Compute all pairwise leaf distances
     pair_to_idx = {
@@ -374,18 +405,31 @@ def compute_initial_tree_distance_estimates(
         ]
     )
     leaf_distances = leaf_stats[:, 0]
-    leaf_variances = leaf_stats[:, 1]
+    leaf_variances = np.maximum(1e-8, leaf_stats[:, 1])
+
+    if min_branch_length < 0.0:
+        # noinspection PyTypeChecker
+        min_branch_length = 1e-5 * np.mean(leaf_distances)
+
+    leaf_distances = np.maximum(min_branch_length, leaf_distances)
+    leaf_variances /= np.mean(leaf_variances)
+
     # create the constraint matrices
     constraints_eqn, constraints_val = make_path_constraints(
         true_tree, num_tree_nodes, leaf_distances, pair_to_idx, node_indices
     )
 
+    branch_len_initial_guess = np.linalg.pinv(constraints_eqn) @ constraints_val
+    branch_len_initial_guess[0] = 0.0
+    branch_len_initial_guess[1:] = np.maximum(min_branch_length, branch_len_initial_guess[1:])
+    np_full_print(branch_len_initial_guess)
+
     def branch_length_estimate_objective_prototype(
         x, *, constraints_eqn, constraints_val, leaf_variances
     ):
         # prediction error (weighted by variance) plus a regularizing term
-        prediction_err = constraints_eqn @ x - constraints_val
-        return np.mean(prediction_err**2 / np.concatenate(([1], leaf_variances))) + np.mean(x**2)
+        prediction_err = (constraints_eqn @ x - constraints_val)[1:]
+        return np.mean(prediction_err**2 / leaf_variances) + x[0]**2
 
     branch_length_estimate_objective = functools.partial(
         branch_length_estimate_objective_prototype,
@@ -395,14 +439,16 @@ def compute_initial_tree_distance_estimates(
     )
     res = minimize(
         branch_length_estimate_objective,
-        np.ones(num_tree_nodes, dtype=np.float64),
+        # np.ones(num_tree_nodes, dtype=np.float64),
+        branch_len_initial_guess,
         bounds=[(0.0, max(min_branch_length / 2, 1e-10))]
         + [(min_branch_length, np.inf)] * (num_tree_nodes - 1),
-        callback=CallbackParam(print_period=10) if opt.log else None,
+        callback=CallbackParam(print_period=10) if log else None,
         method="L-BFGS-B",
-        options=solver_options["L-BFGS-B-Medium"],
+        options=dict({'maxfun': np.inf}, **solver_options["L-BFGS-B-Heavy"]),
     )
-    if opt.log and not res.success:
+    print(res)
+    if log and not res.success:
         print("Optimization did not terminate, continuing anyway", flush=True)
 
     # belt and suspenders for the constraint (avoid -1e-big type bounds violations)
@@ -410,112 +456,6 @@ def compute_initial_tree_distance_estimates(
     tree_distances[1:] = np.maximum(min_branch_length, np.nan_to_num(res.x[1:]))
 
     return tree_distances
-
-
-def read_sequences(ambig_char, sequence_file):
-    import numpy as np
-
-    from pruning.matrices import V, perm
-
-    nuc_to_idx = {"A": 0, "C": 1, "G": 2, "T": 3, ambig_char: 4}
-    unphased_nuc_to_idx = {
-        "AA": 0,
-        "CC": 1,
-        "GG": 2,
-        "TT": 3,
-        "AC": 4,
-        "CA": 4,
-        "AG": 5,
-        "GA": 5,
-        "AT": 6,
-        "TA": 6,
-        "CG": 7,
-        "GC": 7,
-        "CT": 8,
-        "TC": 8,
-        "GT": 9,
-        "TG": 9,
-        ambig_char + ambig_char: 10,
-        "A" + ambig_char: 11,
-        ambig_char + "A": 11,
-        "C" + ambig_char: 12,
-        ambig_char + "C": 12,
-        "G" + ambig_char: 13,
-        ambig_char + "G": 13,
-        "T" + ambig_char: 14,
-        ambig_char + "T": 14,
-    }
-
-    # read and process the sequence file
-    with open(sequence_file, "r") as seq_file:
-        # first line consists of counts
-        ntaxa, nsites = map(int, next(seq_file).split())
-
-        phased_joint_freq_counts = np.zeros(25, dtype=np.int64)
-        # parse sequences
-        sequences_16state = dict()
-        sequences_10state = dict()
-        sequences_4state = dict()
-
-        for line in seq_file:
-            taxon, *seq = line.strip().split()
-            assert taxon not in sequences_16state and taxon not in sequences_10state
-
-            seq = list(map(lambda s: s.upper(), seq))
-            assert all(len(s) == 2 for s in seq)
-
-            sequences_4state[taxon] = np.array(
-                [nuc_to_idx[nuc] for nuc in "".join(seq)],
-                dtype=np.uint8,
-            )
-
-            sequences_10state[taxon] = np.array(
-                [unphased_nuc_to_idx[nuc] for nuc in seq],
-                dtype=np.uint8,
-            )
-
-            # sequence coding is lexicographic AA, AC, AG, AT, A?, CA, ...
-            # which is equivalent to a base-5 encoding 00=0, 01=1, 02=2, 03=3, 04=4, 10=5, ...
-            sequences_16state[taxon] = np.array(
-                [nuc_to_idx[nuc[0]] * 5 + nuc_to_idx[nuc[1]] for nuc in seq],
-                dtype=np.uint8,
-            )
-
-            for nuc in seq:
-                phased_joint_freq_counts[nuc_to_idx[nuc[0]] * 5 + nuc_to_idx[nuc[1]]] += 1
-
-        assert ntaxa == len(sequences_16state)
-
-    freq_count_mat5 = np.sum(phased_joint_freq_counts.reshape(5, 5), axis=1)
-    freq_count_pat5 = np.sum(phased_joint_freq_counts.reshape(5, 5), axis=0)
-
-    freq_count_mat4 = freq_count_mat5[:4] + freq_count_mat5[4] / 4
-    freq_count_pat4 = freq_count_pat5[:4] + freq_count_pat5[4] / 4
-
-    freq_count_4 = freq_count_mat4 + freq_count_pat4
-    pi4 = freq_count_4 / np.sum(freq_count_4)
-
-    print(f"{pi4=}")
-
-    freq_count_16 = (
-        phased_joint_freq_counts.reshape(5, 5)[:4, :4]
-        + phased_joint_freq_counts.reshape(5, 5)[4, :4][None, :] / 4
-        + phased_joint_freq_counts.reshape(5, 5)[:4, 4][:, None] / 4
-        + phased_joint_freq_counts.reshape(5, 5)[4, 4] / 16
-    ).reshape(-1)
-    pi16 = freq_count_16 / np.sum(freq_count_16)
-
-    pi10 = pi16 @ perm @ V
-
-    return (
-        nsites,
-        pi4,
-        pi10,
-        pi16,
-        sequences_16state,
-        sequences_10state,
-        sequences_4state,
-    )
 
 
 def print_states(

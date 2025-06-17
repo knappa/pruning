@@ -127,39 +127,6 @@ sieve_equilibrium = np.array([1, 1, 1, 1, 2, 2, 2, 2, 2, 2]) / 16
 ####################################################################################################
 
 
-def make_A_GTR(pis):
-    pi_a, pi_c, pi_g, pi_t = pis
-    return np.array(
-        # fmt: off
-        # @formatter:off
-        [
-            #  s_ac   s_ag   s_at   s_cg   s_ct   s_gt
-            # row 1
-            [-pi_c, -pi_g, -pi_t,     0,     0,     0],
-            [ pi_c,     0,     0,     0,     0,     0],
-            [    0,  pi_g,     0,     0,     0,     0],
-            [    0,     0,  pi_t,     0,     0,     0],
-            # row 2
-            [ pi_a,     0,     0,     0,     0,     0],
-            [-pi_a,     0,     0, -pi_g, -pi_t,     0],
-            [    0,     0,     0,  pi_g,     0,     0],
-            [    0,     0,     0,     0,  pi_t,     0],
-            # row 3
-            [    0,  pi_a,     0,     0,     0,     0],
-            [    0,     0,     0,  pi_c,     0,     0],
-            [    0, -pi_a,     0, -pi_c,     0, -pi_t],
-            [    0,     0,     0,     0,     0,  pi_t],
-            # row 4
-            [    0,     0,  pi_a,     0,     0,     0],
-            [    0,     0,     0,     0,  pi_c,     0],
-            [    0,     0,     0,     0,     0,  pi_g],
-            [    0,     0, -pi_a,     0, -pi_c, -pi_g],
-        ]
-        # @formatter:on
-        # fmt: on
-    )
-
-
 def gtr4_rate(pis, s_is):
     pi_a, pi_c, pi_g, pi_t = pis
     s_ac, s_ag, s_at, s_cg, s_ct, s_gt = s_is

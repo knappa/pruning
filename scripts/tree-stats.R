@@ -12,7 +12,7 @@ library(phangorn)
 library(tidytree)
 
 #models <- c("4state", "phased16", "phased16mp", "unphased", "cellphy", "gtr10z", "gtr10")
-models <- c("4state", "phased16", "unphased", "cellphy", "gtr10z", "gtr10")
+models <- c("4state", "unphased", "cellphy", "gtr10z", "gtr10")
 
 df <- data.frame(matrix(
   ncol = 10,
