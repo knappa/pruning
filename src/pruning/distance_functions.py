@@ -87,6 +87,12 @@ def sequence_distance(
     beta = 1 / mu
     disagreement = sequence_disagreement(seq1, seq2)
 
+    # It is possible for the disagreement to be "too large" for the formula to handle, since 1-(pi@D_P(t)) is
+    # increasing in t with an asymptote at 1-(pi@pi). So we cap the disagreement just below that threshold.
+    gap = 1e-7
+    asymptotic_disagreement = 1 - np.dot(pis, pis)
+    disagreement = np.clip(disagreement, 0.0, max(0.0, asymptotic_disagreement - gap))
+
     def expected_mutations(nu: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
         if isinstance(nu, np.ndarray) and len(nu.shape) > 0:
             return np.array([expected_mutations(nu_part) for nu_part in nu])
@@ -94,21 +100,28 @@ def sequence_distance(
         # noinspection PyTypeChecker
         return 1 - (pis @ np.diag(P_nu))
 
-    # at nu=0, the proportion of expected mutations is zero. Increment lower bound for nu by 1 until nu+1 surpasses
-    # the measured proportion of mutations.
-    lower_bound = 0.0
-    while expected_mutations(lower_bound + 1.0) < disagreement:
-        lower_bound += 1.0
+    if disagreement == 0.0:
+        branch_length = 0.0
+    else:
+        step = 0.25
+        # at nu=0, the proportion of expected mutations is zero. Increment lower bound for nu by step until nu+step
+        # surpasses the measured proportion of mutations.
+        lower_bound = 0.0
+        while expected_mutations(lower_bound + step) < disagreement:
+            lower_bound += step
 
-    # at nu=lower_bound, the proportion of expected mutations is lower than the measured proportion. Increase nu
-    # by 1.0 until the proportion of expected mutations is strictly greater than the measured proportion.
-    upper_bound = lower_bound + 1.0
-    while expected_mutations(upper_bound) <= disagreement:
-        upper_bound += 1.0
+        # at nu=lower_bound, the proportion of expected mutations is lower than the measured proportion. Increase nu
+        # by step until the proportion of expected mutations is strictly greater than the measured proportion.
+        upper_bound = lower_bound + step
+        while expected_mutations(upper_bound) <= disagreement:
+            upper_bound += step
 
-    branch_length, convergence_result = brentq(
-        lambda nu: disagreement - expected_mutations(nu), lower_bound, upper_bound, full_output=True
-    )
+        branch_length, convergence_result = brentq(
+            lambda nu: disagreement - expected_mutations(nu),
+            lower_bound,
+            upper_bound,
+            full_output=True,
+        )
 
     deriv_res = derivative(expected_mutations, branch_length)
     deriv = deriv_res.df

@@ -422,14 +422,13 @@ def compute_initial_tree_distance_estimates(
     branch_len_initial_guess = np.linalg.pinv(constraints_eqn) @ constraints_val
     branch_len_initial_guess[0] = 0.0
     branch_len_initial_guess[1:] = np.maximum(min_branch_length, branch_len_initial_guess[1:])
-    np_full_print(branch_len_initial_guess)
 
     def branch_length_estimate_objective_prototype(
         x, *, constraints_eqn, constraints_val, leaf_variances
     ):
         # prediction error (weighted by variance) plus a regularizing term
         prediction_err = (constraints_eqn @ x - constraints_val)[1:]
-        return np.mean(prediction_err**2 / leaf_variances) + x[0]**2
+        return np.mean(prediction_err**2 / leaf_variances) + x[0] ** 2
 
     branch_length_estimate_objective = functools.partial(
         branch_length_estimate_objective_prototype,
@@ -445,7 +444,7 @@ def compute_initial_tree_distance_estimates(
         + [(min_branch_length, np.inf)] * (num_tree_nodes - 1),
         callback=CallbackParam(print_period=10) if log else None,
         method="L-BFGS-B",
-        options=dict({'maxfun': np.inf}, **solver_options["L-BFGS-B-Heavy"]),
+        options=dict({"maxfun": np.inf}, **solver_options["L-BFGS-B-Heavy"]),
     )
     print(res)
     if log and not res.success:
