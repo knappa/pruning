@@ -5,7 +5,7 @@ cd ~/pruning/ || exit
 source venv/bin/activate
 
 PARENT_DIR=~/pruning/data
-NJOBS=22
+NJOBS=$(nproc --ignore 2)
 SEQ_ERR=0.00
 ADO=0.00
 
