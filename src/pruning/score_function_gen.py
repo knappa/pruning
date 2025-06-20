@@ -9,6 +9,7 @@ from pruning.util import kahan_dot, log_dot, log_matrix_mult
 
 def compute_leaf_vec(patterns, num_states) -> Callable:
     # print(f"compute_leaf_vector({patterns=})")
+    # noinspection PyUnreachableCode
     match num_states:
         case 4:
             id4 = np.identity(4, dtype=np.float64)
@@ -159,6 +160,60 @@ def compute_score_function(
 
     return numba.jit(score_function, nopython=False, forceobj=True)
     # return score_function
+
+
+def compute_factored_score_function(
+    *, root, patterns, pattern_counts, num_states, taxa_indices, node_indices
+) -> Callable:
+
+    # separate maternal and paternal patterns
+    maternal_patterns, paternal_patterns = np.divmod(patterns, 5)
+
+    # deduplicate maternal patterns, combining counts
+    reduced_maternal_patterns, maternal_pattern_indices = np.unique(
+        maternal_patterns, axis=0, return_inverse=True
+    )
+    maternal_pattern_counts = np.zeros(shape=reduced_maternal_patterns.shape[0], dtype=np.int64)
+    for orig_idx, dedup_idx in enumerate(maternal_pattern_indices):
+        maternal_pattern_counts[dedup_idx] += pattern_counts[orig_idx]
+
+    # create maternal score function
+    maternal_v_function = compute_score_function_helper(
+        root, maternal_patterns, taxa_indices, num_states, node_indices
+    )
+
+    def maternal_score_function(log_freq_params, prob_matrices):
+        v = maternal_v_function(prob_matrices)
+        # can't assume that pis are normalized
+        log_freq_params_corrected = log_freq_params - logsumexp(log_freq_params)
+        return -kahan_dot(maternal_pattern_counts, log_dot(v, log_freq_params_corrected))
+
+    # deduplicate paternal patterns, combining counts
+    reduced_paternal_patterns, paternal_pattern_indices = np.unique(
+        paternal_patterns, axis=0, return_inverse=True
+    )
+    paternal_pattern_counts = np.zeros(shape=reduced_paternal_patterns.shape[0], dtype=np.int64)
+    for orig_idx, dedup_idx in enumerate(paternal_pattern_indices):
+        paternal_pattern_counts[dedup_idx] += pattern_counts[orig_idx]
+
+    # create paternal score function
+    paternal_v_function = compute_score_function_helper(
+        root, paternal_patterns, taxa_indices, num_states, node_indices
+    )
+
+    def paternal_score_function(log_freq_params, prob_matrices):
+        v = paternal_v_function(prob_matrices)
+        # can't assume that pis are normalized
+        log_freq_params_corrected = log_freq_params - logsumexp(log_freq_params)
+        return -kahan_dot(paternal_pattern_counts, log_dot(v, log_freq_params_corrected))
+
+    # joint mat/pat score function
+    def score_function(log_freq_params, prob_matrices):
+        return maternal_score_function(log_freq_params, prob_matrices) + paternal_score_function(
+            log_freq_params, prob_matrices
+        )
+
+    return numba.jit(score_function, nopython=False, forceobj=True)
 
 
 def neg_log_likelihood_prototype(
