@@ -11,6 +11,7 @@ def main_cli():
 
     from pruning.fit import (
         compute_initial_tree_distance_estimates,
+        fit_factored_model,
         fit_model,
         print_states,
         save_as_newick,
@@ -159,11 +160,17 @@ def main_cli():
 
     if hasattr(sys, "ps1"):
         opt = parser.parse_args(
-            "--seqs test-data/test-data-diploid.phy "
-            "--tree test-data/test-data-diploid.nwk "
-            "--model UNPHASED_DNA "
+            "--seqs /home/knappa/pruning/data/diploid-sites-10000-seq-err-0.00-ado-0.00/diploid-000.phy "
+            "--tree /home/knappa/pruning/data/diploid-sites-10000-seq-err-0.00-ado-0.00/tree-000.nwk "
+            "--model PHASED_DNA16_4 "
             "--log ".split()
         )
+        # opt = parser.parse_args(
+        #     "--seqs test-data/test-data-diploid.phy "
+        #     "--tree test-data/test-data-diploid.nwk "
+        #     "--model UNPHASED_DNA "
+        #     "--log ".split()
+        # )
     else:
         opt = parser.parse_args()
 
@@ -313,6 +320,14 @@ def main_cli():
         counts[pattern] += 1
 
     ################################################################################
+    # collect true-tree branch length data for comparison, possibly on a different scale,
+    # so not directly comparable, but good to have
+
+    true_branch_lens = np.zeros(num_tree_nodes, dtype=np.float64)
+    for node in true_tree.traverse():
+        true_branch_lens[node_indices[node.name]] = node.dist
+
+    ################################################################################
     # initial estimates for branch lengths based on (generalized) F81 distances
 
     branch_lengths_init = compute_initial_tree_distance_estimates(
@@ -329,12 +344,6 @@ def main_cli():
     if opt.log:
         print("Branch length estimate:")
         print(branch_lengths_init)
-
-    # collect true tree data for comparison, possibly on a different scale, so not directly
-    # comparable, but good to have
-    true_branch_lens = np.zeros(num_tree_nodes, dtype=np.float64)
-    for node in true_tree.traverse():
-        true_branch_lens[node_indices[node.name]] = node.dist
 
     ################################################################################
     # set rate constraint and initial estimates for GTR parameters
@@ -431,7 +440,11 @@ def main_cli():
             if final_rp_norm
             else 1
         ),
-        output=opt.output + "-before-lklyhd-opt.nwk",
+        output=(
+            opt.output + "-before-lklyhd-opt.nwk"
+            if hasattr(opt, "output") and opt.output is not None
+            else ""
+        ),
         true_tree=true_tree,
         to_stdout=(not hasattr(opt, "output")) or opt.output is None,
     )
@@ -442,18 +455,50 @@ def main_cli():
 
     if model == "PHASED_DNA16_4":
         # use the factored score function
-        neg_log_likelihood = functools.partial(
+        mat_score, pat_score = compute_factored_score_function(
+            root=true_tree,
+            patterns=np.array([pattern for pattern in counts.keys()]),
+            pattern_counts=np.array([count for count in counts.values()]),
+            num_states=num_states,
+            taxa_indices=taxa_indices,
+            node_indices=node_indices,
+        )
+
+        mat_neg_log_likelihood = functools.partial(
             neg_log_likelihood_prototype,
             prob_model_maker=prob_model_maker,
-            score_function=compute_factored_score_function(
-                root=true_tree,
-                patterns=np.array([pattern for pattern in counts.keys()]),
-                pattern_counts=np.array([count for count in counts.values()]),
-                num_states=num_states,
-                taxa_indices=taxa_indices,
-                node_indices=node_indices,
-            ),
+            score_function=mat_score,
         )
+
+        pat_neg_log_likelihood = functools.partial(
+            neg_log_likelihood_prototype,
+            prob_model_maker=prob_model_maker,
+            score_function=pat_score,
+        )
+
+        def joint_score(log_freq_params, prob_matrices):
+            return mat_score(log_freq_params, prob_matrices) + pat_score(
+                log_freq_params, prob_matrices
+            )
+
+        joint_neg_log_likelihood = functools.partial(
+            neg_log_likelihood_prototype,
+            prob_model_maker=prob_model_maker,
+            score_function=joint_score,
+        )
+
+        rate_params, branch_lengths, nll = fit_factored_model(
+            mat_neg_log_likelihood=mat_neg_log_likelihood,
+            pat_neg_log_likelihood=pat_neg_log_likelihood,
+            joint_neg_log_likelihood=joint_neg_log_likelihood,
+            branch_lengths=branch_lengths_init,
+            rate_params=rate_params_init,
+            log_freq_params=log_freq_params,
+            rate_constraint=rate_constraint,
+            ploidy=ploidy,
+            final_rp_norm=final_rp_norm,
+        )
+
     else:
         neg_log_likelihood = functools.partial(
             neg_log_likelihood_prototype,
@@ -468,15 +513,15 @@ def main_cli():
             ),
         )
 
-    rate_params, branch_lengths, nll = fit_model(
-        neg_log_likelihood=neg_log_likelihood,
-        branch_lengths=branch_lengths_init,
-        rate_params=rate_params_init,
-        log_freq_params=log_freq_params,
-        rate_constraint=rate_constraint,
-        ploidy=ploidy,
-        final_rp_norm=final_rp_norm,
-    )
+        rate_params, branch_lengths, nll = fit_model(
+            neg_log_likelihood=neg_log_likelihood,
+            branch_lengths=branch_lengths_init,
+            rate_params=rate_params_init,
+            log_freq_params=log_freq_params,
+            rate_constraint=rate_constraint,
+            ploidy=ploidy,
+            final_rp_norm=final_rp_norm,
+        )
 
     save_as_newick(
         branch_lengths=branch_lengths,

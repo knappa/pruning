@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Tuple
 
 import numba
 import numpy as np
@@ -164,7 +164,7 @@ def compute_score_function(
 
 def compute_factored_score_function(
     *, root, patterns, pattern_counts, num_states, taxa_indices, node_indices
-) -> Callable:
+) -> Tuple[Callable, Callable]:
 
     # separate maternal and paternal patterns
     maternal_patterns, paternal_patterns = np.divmod(patterns, 5)
@@ -207,13 +207,9 @@ def compute_factored_score_function(
         log_freq_params_corrected = log_freq_params - logsumexp(log_freq_params)
         return -kahan_dot(paternal_pattern_counts, log_dot(v, log_freq_params_corrected))
 
-    # joint mat/pat score function
-    def score_function(log_freq_params, prob_matrices):
-        return maternal_score_function(log_freq_params, prob_matrices) + paternal_score_function(
-            log_freq_params, prob_matrices
-        )
-
-    return numba.jit(score_function, nopython=False, forceobj=True)
+    return numba.jit(maternal_score_function, nopython=False, forceobj=True), numba.jit(
+        paternal_score_function, nopython=False, forceobj=True
+    )
 
 
 def neg_log_likelihood_prototype(

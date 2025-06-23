@@ -215,7 +215,7 @@ def rate_param_cleanup(*, x, log_freq_params, ploidy, rate_constraint):
 # solver options
 
 # L-BFGS-B defaults:
-# m=10 maximum number of variable metric corrections
+# m=10 maximum number of variable metric corrections (maxcor)
 # factr=1e7 Typical values for `factr` are:
 #     1e12 for low accuracy;
 #     1e7 for moderate accuracy;
@@ -236,10 +236,24 @@ def rate_param_cleanup(*, x, log_freq_params, ploidy, rate_constraint):
 solver_options = defaultdict(dict)
 # solver_options["L-BFGS-B"] = {"maxiter": 20_000, "maxfun": 20_000, "ftol": 1e-8}
 # solver_options["L-BFGS-B-Lite"] = {"maxiter": 10_000, "maxfun": 10_000, "ftol": 1e-1 }
-solver_options["L-BFGS-B"] = {"ftol": 1e7 * float(np.finfo(float).eps)}
-solver_options["L-BFGS-B-Lite"] = {"ftol": 1e12 * float(np.finfo(float).eps)}
-solver_options["L-BFGS-B-Medium"] = {"ftol": 1e7 * float(np.finfo(float).eps)}
-solver_options["L-BFGS-B-Heavy"] = {"ftol": 1e2 * float(np.finfo(float).eps)}
+solver_options["L-BFGS-B"] = {
+    "ftol": 1e7 * float(np.finfo(float).eps),
+    "maxfun": np.inf,
+}
+solver_options["L-BFGS-B-Lite"] = {
+    "ftol": 1e12 * float(np.finfo(float).eps),
+    "maxfun": np.inf,
+}
+solver_options["L-BFGS-B-Medium"] = {
+    "ftol": 1e7 * float(np.finfo(float).eps),
+    "maxls": 30,
+    "maxfun": np.inf,
+}
+solver_options["L-BFGS-B-Heavy"] = {
+    "ftol": 1e2 * float(np.finfo(float).eps),
+    "maxls": 40,
+    "maxfun": np.inf,
+}
 solver_options["Powell"] = {"maxiter": 1000, "ftol": 1e2 * float(np.finfo(float).eps)}
 solver_options["Nelder-Mead"] = {
     "adaptive": True,
