@@ -144,6 +144,16 @@ def main_cli():
     ################################################################################
 
     parser.add_argument(
+        "--fixed_rate_params",
+        required=False,
+        type=float,
+        nargs="+",
+        help="use fixed rate parameters. (parameters will still be normalized, but not optimized)",
+    )
+
+    ################################################################################
+
+    parser.add_argument(
         "--ploidy", type=int, default=-1, help="force the ploidy to a specific value"
     )
 
@@ -413,7 +423,20 @@ def main_cli():
     with np.errstate(divide="ignore"):
         log_freq_params = np.clip(np.nan_to_num(np.log(freq_params)), -1e100, 0.0)
 
-    rate_params_init = np.ones(num_rate_params)
+    use_fixed_rate_params = (
+        hasattr(opt, "fixed_rate_params")
+        and opt.fixed_rate_params is not None
+        and len(opt.fixed_rate_params) > 0
+    )
+    if use_fixed_rate_params:
+        rate_params_init = np.array(opt.fixed_rate_params, dtype=np.float64)
+        assert len(rate_params_init) == num_rate_params, (
+            f"Number of rate parameters provided, {len(rate_params_init)}, "
+            f"does not match the number for this model: {num_rate_params}"
+        )
+    else:
+        rate_params_init = np.ones(num_rate_params)
+
     if not final_rp_norm:
         rate_params_init = rate_param_cleanup(
             x=rate_params_init,
@@ -497,6 +520,7 @@ def main_cli():
             rate_constraint=rate_constraint,
             ploidy=ploidy,
             final_rp_norm=final_rp_norm,
+            fix_rate_params=use_fixed_rate_params,
         )
 
     else:
@@ -521,6 +545,7 @@ def main_cli():
             rate_constraint=rate_constraint,
             ploidy=ploidy,
             final_rp_norm=final_rp_norm,
+            fix_rate_params=use_fixed_rate_params,
         )
 
     save_as_newick(

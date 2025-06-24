@@ -30,6 +30,7 @@ def fit_model(
     log: bool = True,
     min_branch_length: float = 1e-8,
     min_rate_param: float = 1e-8,
+    fix_rate_params: bool = False,
 ):
     """
     Fit the model.
@@ -44,6 +45,7 @@ def fit_model(
     :param log:
     :param min_branch_length: TODO questionable
     :param min_rate_param: TODO questionable
+    :param fix_rate_params: if True, do not optimize the rate parameters
     :return:
     """
     import functools
@@ -101,38 +103,39 @@ def fit_model(
 
         ################################################################################
 
-        if log:
-            print("optimizing rate parameters from likelihood function " + options, flush=True)
-        try:
-            # optimize rate parameters
-            res = minimize(
-                param_objective,
-                rate_params,
-                args=(
-                    log_freq_params,
-                    branch_lengths,
-                ),
-                method="L-BFGS-B",
-                bounds=[(min_rate_param, np.inf)] * num_rate_params,
-                callback=CallbackParam(print_period=10) if log else None,
-                options=solver_options[options],
-            )
-            best_nll = np.minimum(best_nll, res.fun)
+        if not fix_rate_params:
             if log:
-                print(res, flush=True)
+                print("optimizing rate parameters from likelihood function " + options, flush=True)
+            try:
+                # optimize rate parameters
+                res = minimize(
+                    param_objective,
+                    rate_params,
+                    args=(
+                        log_freq_params,
+                        branch_lengths,
+                    ),
+                    method="L-BFGS-B",
+                    bounds=[(min_rate_param, np.inf)] * num_rate_params,
+                    callback=CallbackParam(print_period=10) if log else None,
+                    options=solver_options[options],
+                )
+                best_nll = np.minimum(best_nll, res.fun)
+                if log:
+                    print(res, flush=True)
 
-            rate_params = np.clip(np.nan_to_num(res.x), min_rate_param, np.inf)
-            rate_params, branch_lengths = scale_params(
-                rate_params=rate_params,
-                branch_lengths=branch_lengths,
-                log_freq_params=log_freq_params,
-                ploidy=ploidy,
-                rate_constraint=rate_constraint,
-                final_rp_norm=final_rp_norm,
-            )
+                rate_params = np.clip(np.nan_to_num(res.x), min_rate_param, np.inf)
+                rate_params, branch_lengths = scale_params(
+                    rate_params=rate_params,
+                    branch_lengths=branch_lengths,
+                    log_freq_params=log_freq_params,
+                    ploidy=ploidy,
+                    rate_constraint=rate_constraint,
+                    final_rp_norm=final_rp_norm,
+                )
 
-        except ValueError:
-            pass
+            except ValueError:
+                pass
 
         ################################################################################
 
@@ -162,46 +165,49 @@ def fit_model(
 
         ################################################################################
 
-        if log:
-            print(
-                "optimizing joint rate parameters and branch lengths from likelihood function "
-                + options,
-                flush=True,
-            )
-        # local search in joint rate parameter + branch length space
-        try:
-            res = minimize(
-                params_distances_objective,
-                np.concatenate((rate_params, branch_lengths)),
-                args=(log_freq_params,),
-                method="L-BFGS-B",
-                bounds=[(min_rate_param, np.inf)] * num_rate_params
-                + [(0.0, np.maximum(min_branch_length / 2, 1e-10))]
-                + [(min_branch_length, np.inf)] * (num_branch_lens - 1),
-                callback=CallbackParam(print_period=10) if log else None,
-                options=solver_options[options],
-            )
-            best_nll = np.minimum(best_nll, res.fun)
+        if not fix_rate_params:
             if log:
-                print(res, flush=True)
+                print(
+                    "optimizing joint rate parameters and branch lengths from likelihood function "
+                    + options,
+                    flush=True,
+                )
+            # local search in joint rate parameter + branch length space
+            try:
+                res = minimize(
+                    params_distances_objective,
+                    np.concatenate((rate_params, branch_lengths)),
+                    args=(log_freq_params,),
+                    method="L-BFGS-B",
+                    bounds=[(min_rate_param, np.inf)] * num_rate_params
+                    + [(0.0, np.maximum(min_branch_length / 2, 1e-10))]
+                    + [(min_branch_length, np.inf)] * (num_branch_lens - 1),
+                    callback=CallbackParam(print_period=10) if log else None,
+                    options=solver_options[options],
+                )
+                best_nll = np.minimum(best_nll, res.fun)
+                if log:
+                    print(res, flush=True)
 
-            rate_params = np.clip(np.nan_to_num(res.x[:num_rate_params]), min_rate_param, np.inf)
-            rate_params, branch_lengths = scale_params(
-                rate_params=rate_params,
-                branch_lengths=branch_lengths,
-                log_freq_params=log_freq_params,
-                ploidy=ploidy,
-                rate_constraint=rate_constraint,
-                final_rp_norm=final_rp_norm,
-            )
+                rate_params = np.clip(
+                    np.nan_to_num(res.x[:num_rate_params]), min_rate_param, np.inf
+                )
+                rate_params, branch_lengths = scale_params(
+                    rate_params=rate_params,
+                    branch_lengths=branch_lengths,
+                    log_freq_params=log_freq_params,
+                    ploidy=ploidy,
+                    rate_constraint=rate_constraint,
+                    final_rp_norm=final_rp_norm,
+                )
 
-            branch_lengths[0] = 0.0
-            branch_lengths[1:] = np.clip(
-                np.nan_to_num(res.x[num_rate_params + 1 :]), min_branch_length, np.inf
-            )
+                branch_lengths[0] = 0.0
+                branch_lengths[1:] = np.clip(
+                    np.nan_to_num(res.x[num_rate_params + 1 :]), min_branch_length, np.inf
+                )
 
-        except ValueError:
-            pass
+            except ValueError:
+                pass
 
     ################################################################################
 
@@ -232,50 +238,51 @@ def fit_model(
 
     ################################################################################
 
-    if log:
-        print(
-            "optimizing joint rate parameters and branch lengths from likelihood function "
-            "with extra constraint weight",
-            flush=True,
-        )
-    # local search in joint rate parameter + branch length space
-    params_distances_objective = functools.partial(
-        params_distances_objective,
-        constraint_weight=best_nll,
-    )
-    try:
-        res = minimize(
-            params_distances_objective,
-            np.concatenate((rate_params, branch_lengths)),
-            args=(log_freq_params,),
-            method="L-BFGS-B",
-            bounds=[(min_rate_param, np.inf)] * num_rate_params
-            + [(0.0, np.maximum(min_branch_length / 2, 1e-10))]
-            + [(min_branch_length, np.inf)] * (num_branch_lens - 1),
-            callback=CallbackParam(print_period=10) if log else None,
-            options=dict({"maxfun": np.inf}, **solver_options["L-BFGS-B-Heavy"]),
-        )
-        best_nll = np.minimum(best_nll, res.fun)
+    if not fix_rate_params:
         if log:
-            print(res, flush=True)
-
-        rate_params = np.clip(np.nan_to_num(res.x[:num_rate_params]), min_rate_param, np.inf)
-        rate_params, branch_lengths = scale_params(
-            rate_params=rate_params,
-            branch_lengths=branch_lengths,
-            log_freq_params=log_freq_params,
-            ploidy=ploidy,
-            rate_constraint=rate_constraint,
-            final_rp_norm=final_rp_norm,
+            print(
+                "optimizing joint rate parameters and branch lengths from likelihood function "
+                "with extra constraint weight",
+                flush=True,
+            )
+        # local search in joint rate parameter + branch length space
+        params_distances_objective = functools.partial(
+            params_distances_objective,
+            constraint_weight=best_nll,
         )
+        try:
+            res = minimize(
+                params_distances_objective,
+                np.concatenate((rate_params, branch_lengths)),
+                args=(log_freq_params,),
+                method="L-BFGS-B",
+                bounds=[(min_rate_param, np.inf)] * num_rate_params
+                + [(0.0, np.maximum(min_branch_length / 2, 1e-10))]
+                + [(min_branch_length, np.inf)] * (num_branch_lens - 1),
+                callback=CallbackParam(print_period=10) if log else None,
+                options=dict({"maxfun": np.inf}, **solver_options["L-BFGS-B-Heavy"]),
+            )
+            best_nll = np.minimum(best_nll, res.fun)
+            if log:
+                print(res, flush=True)
 
-        branch_lengths[0] = 0.0
-        branch_lengths[1:] = np.clip(
-            np.nan_to_num(res.x[num_rate_params + 1 :]), min_branch_length, np.inf
-        )
+            rate_params = np.clip(np.nan_to_num(res.x[:num_rate_params]), min_rate_param, np.inf)
+            rate_params, branch_lengths = scale_params(
+                rate_params=rate_params,
+                branch_lengths=branch_lengths,
+                log_freq_params=log_freq_params,
+                ploidy=ploidy,
+                rate_constraint=rate_constraint,
+                final_rp_norm=final_rp_norm,
+            )
 
-    except ValueError:
-        pass
+            branch_lengths[0] = 0.0
+            branch_lengths[1:] = np.clip(
+                np.nan_to_num(res.x[num_rate_params + 1 :]), min_branch_length, np.inf
+            )
+
+        except ValueError:
+            pass
 
     bare_nll = neg_log_likelihood(log_freq_params, rate_params, branch_lengths)
 
@@ -301,6 +308,7 @@ def fit_factored_model(
     log: bool = True,
     min_branch_length: float = 1e-8,
     min_rate_param: float = 1e-8,
+    fix_rate_params: bool = False,
 ):
     """
     Fit the model.
@@ -317,6 +325,7 @@ def fit_factored_model(
     :param log:
     :param min_branch_length: TODO questionable
     :param min_rate_param: TODO questionable
+    :param fix_rate_params: if True, do not optimize the rate parameters
     :return:
     """
     import functools
@@ -411,126 +420,135 @@ def fit_factored_model(
     branch_lengths[0] = 0.0
     branch_lengths[1:] = np.clip(np.nan_to_num(branch_lengths[1:]), min_branch_length, np.inf)
 
-    ################################################################################
-    # initial rate parameter estimate, for maternal and paternal separately
+    if not fix_rate_params:
+        ################################################################################
+        # initial rate parameter estimate, for maternal and paternal separately
 
-    mat_rate_params = rate_params.copy()
-    pat_rate_params = rate_params.copy()
+        mat_rate_params = rate_params.copy()
+        pat_rate_params = rate_params.copy()
 
-    options = "L-BFGS-B-Lite"
-    if log:
-        print(
-            "optimizing rate parameters on maternal sequence from likelihood function " + options,
-            flush=True,
-        )
-    try:
-        # optimize rate parameters
-        res = minimize(
-            mat_param_objective,
-            rate_params,
-            args=(
-                log_freq_params,
-                branch_lengths,
-            ),
-            method="L-BFGS-B",
-            bounds=[(min_rate_param, np.inf)] * num_rate_params,
-            callback=CallbackParam(print_period=10) if log else None,
-            options=dict({"maxcor": np.minimum(200, num_rate_params)}, **solver_options[options]),
-        )
-        best_mat_nll = np.minimum(best_mat_nll, res.fun)
+        options = "L-BFGS-B-Lite"
         if log:
-            print(res, flush=True)
+            print(
+                "optimizing rate parameters on maternal sequence from likelihood function "
+                + options,
+                flush=True,
+            )
+        try:
+            # optimize rate parameters
+            res = minimize(
+                mat_param_objective,
+                rate_params,
+                args=(
+                    log_freq_params,
+                    branch_lengths,
+                ),
+                method="L-BFGS-B",
+                bounds=[(min_rate_param, np.inf)] * num_rate_params,
+                callback=CallbackParam(print_period=10) if log else None,
+                options=dict(
+                    {"maxcor": np.minimum(200, num_rate_params)}, **solver_options[options]
+                ),
+            )
+            best_mat_nll = np.minimum(best_mat_nll, res.fun)
+            if log:
+                print(res, flush=True)
 
-        mat_rate_params = np.clip(np.nan_to_num(res.x), min_rate_param, np.inf)
-        mat_rate_params, branch_lengths = scale_params(
-            rate_params=mat_rate_params,
-            branch_lengths=branch_lengths,
-            log_freq_params=log_freq_params,
-            ploidy=ploidy,
-            rate_constraint=rate_constraint,
-            final_rp_norm=final_rp_norm,
-        )
+            mat_rate_params = np.clip(np.nan_to_num(res.x), min_rate_param, np.inf)
+            mat_rate_params, branch_lengths = scale_params(
+                rate_params=mat_rate_params,
+                branch_lengths=branch_lengths,
+                log_freq_params=log_freq_params,
+                ploidy=ploidy,
+                rate_constraint=rate_constraint,
+                final_rp_norm=final_rp_norm,
+            )
 
-    except ValueError:
-        pass
+        except ValueError:
+            pass
 
-    options = "L-BFGS-B-Lite"
-    if log:
-        print(
-            "optimizing rate parameters on paternal sequence from likelihood function " + options,
-            flush=True,
-        )
-    try:
-        # optimize rate parameters
-        res = minimize(
-            pat_param_objective,
-            rate_params,
-            args=(
-                log_freq_params,
-                branch_lengths,
-            ),
-            method="L-BFGS-B",
-            bounds=[(min_rate_param, np.inf)] * num_rate_params,
-            callback=CallbackParam(print_period=10) if log else None,
-            options=dict({"maxcor": np.minimum(200, num_rate_params)}, **solver_options[options]),
-        )
-        best_pat_nll = np.minimum(best_pat_nll, res.fun)
+        options = "L-BFGS-B-Lite"
         if log:
-            print(res, flush=True)
+            print(
+                "optimizing rate parameters on paternal sequence from likelihood function "
+                + options,
+                flush=True,
+            )
+        try:
+            # optimize rate parameters
+            res = minimize(
+                pat_param_objective,
+                rate_params,
+                args=(
+                    log_freq_params,
+                    branch_lengths,
+                ),
+                method="L-BFGS-B",
+                bounds=[(min_rate_param, np.inf)] * num_rate_params,
+                callback=CallbackParam(print_period=10) if log else None,
+                options=dict(
+                    {"maxcor": np.minimum(200, num_rate_params)}, **solver_options[options]
+                ),
+            )
+            best_pat_nll = np.minimum(best_pat_nll, res.fun)
+            if log:
+                print(res, flush=True)
 
-        pat_rate_params = np.clip(np.nan_to_num(res.x), min_rate_param, np.inf)
-        pat_rate_params, branch_lengths = scale_params(
-            rate_params=pat_rate_params,
-            branch_lengths=branch_lengths,
-            log_freq_params=log_freq_params,
-            ploidy=ploidy,
-            rate_constraint=rate_constraint,
-            final_rp_norm=final_rp_norm,
-        )
+            pat_rate_params = np.clip(np.nan_to_num(res.x), min_rate_param, np.inf)
+            pat_rate_params, branch_lengths = scale_params(
+                rate_params=pat_rate_params,
+                branch_lengths=branch_lengths,
+                log_freq_params=log_freq_params,
+                ploidy=ploidy,
+                rate_constraint=rate_constraint,
+                final_rp_norm=final_rp_norm,
+            )
 
-    except ValueError:
-        pass
+        except ValueError:
+            pass
 
-    ################################################################################
-    # estimate and optimize consensus rate params from mat/pat
-    rate_params = 0.5 * (mat_rate_params + pat_rate_params)
+        ################################################################################
+        # estimate and optimize consensus rate params from mat/pat
+        rate_params = 0.5 * (mat_rate_params + pat_rate_params)
 
-    options = "L-BFGS-B-Lite"
-    if log:
-        print(
-            "optimizing rate parameters on joint sequence from likelihood function " + options,
-            flush=True,
-        )
-    try:
-        # optimize rate parameters
-        res = minimize(
-            joint_param_objective,
-            rate_params,
-            args=(
-                log_freq_params,
-                branch_lengths,
-            ),
-            method="L-BFGS-B",
-            bounds=[(min_rate_param, np.inf)] * num_rate_params,
-            callback=CallbackParam(print_period=10) if log else None,
-            options=dict({"maxcor": np.minimum(200, num_rate_params)}, **solver_options[options]),
-        )
-        best_nll = np.minimum(best_nll, res.fun)
+        options = "L-BFGS-B-Lite"
         if log:
-            print(res, flush=True)
+            print(
+                "optimizing rate parameters on joint sequence from likelihood function " + options,
+                flush=True,
+            )
+        try:
+            # optimize rate parameters
+            res = minimize(
+                joint_param_objective,
+                rate_params,
+                args=(
+                    log_freq_params,
+                    branch_lengths,
+                ),
+                method="L-BFGS-B",
+                bounds=[(min_rate_param, np.inf)] * num_rate_params,
+                callback=CallbackParam(print_period=10) if log else None,
+                options=dict(
+                    {"maxcor": np.minimum(200, num_rate_params)}, **solver_options[options]
+                ),
+            )
+            best_nll = np.minimum(best_nll, res.fun)
+            if log:
+                print(res, flush=True)
 
-        rate_params = np.clip(np.nan_to_num(res.x), min_rate_param, np.inf)
-        rate_params, branch_lengths = scale_params(
-            rate_params=rate_params,
-            branch_lengths=branch_lengths,
-            log_freq_params=log_freq_params,
-            ploidy=ploidy,
-            rate_constraint=rate_constraint,
-            final_rp_norm=final_rp_norm,
-        )
+            rate_params = np.clip(np.nan_to_num(res.x), min_rate_param, np.inf)
+            rate_params, branch_lengths = scale_params(
+                rate_params=rate_params,
+                branch_lengths=branch_lengths,
+                log_freq_params=log_freq_params,
+                ploidy=ploidy,
+                rate_constraint=rate_constraint,
+                final_rp_norm=final_rp_norm,
+            )
 
-    except ValueError:
-        pass
+        except ValueError:
+            pass
 
     ################################################################################
     # initial rate-parameter-informed estimate of branch lengths on mat/pat trees
@@ -621,54 +639,55 @@ def fit_factored_model(
     # Optimize rate-params + branch-lengths on joint mat/pat data, with
     # higher weights for the rate constraints
 
-    options = "L-BFGS-B-Medium"
-    if log:
-        print(
-            "optimizing joint rate parameters and branch lengths from likelihood function "
-            "with extra constraint weight " + options,
-            flush=True,
-        )
-    # local search in joint rate parameter + branch length space
-    params_distances_objective_extra_weight = functools.partial(
-        joint_params_distances_objective,
-        constraint_weight=best_nll,
-    )
-    try:
-        res = minimize(
-            params_distances_objective_extra_weight,
-            np.concatenate((rate_params, branch_lengths)),
-            args=(log_freq_params,),
-            method="L-BFGS-B",
-            bounds=[(min_rate_param, np.inf)] * num_rate_params
-            + [(0.0, np.maximum(min_branch_length / 2, 1e-10))]
-            + [(min_branch_length, np.inf)] * (num_branch_lens - 1),
-            callback=CallbackParam(print_period=10) if log else None,
-            options=dict(
-                {"maxcor": np.minimum(200, num_rate_params + num_branch_lens)},
-                **solver_options[options],
-            ),
-        )
-        best_nll = np.minimum(best_nll, res.fun)
+    if not fix_rate_params:
+        options = "L-BFGS-B-Medium"
         if log:
-            print(res, flush=True)
-
-        rate_params = np.clip(np.nan_to_num(res.x[:num_rate_params]), min_rate_param, np.inf)
-        rate_params, branch_lengths = scale_params(
-            rate_params=rate_params,
-            branch_lengths=branch_lengths,
-            log_freq_params=log_freq_params,
-            ploidy=ploidy,
-            rate_constraint=rate_constraint,
-            final_rp_norm=final_rp_norm,
+            print(
+                "optimizing joint rate parameters and branch lengths from likelihood function "
+                "with extra constraint weight " + options,
+                flush=True,
+            )
+        # local search in joint rate parameter + branch length space
+        params_distances_objective_extra_weight = functools.partial(
+            joint_params_distances_objective,
+            constraint_weight=best_nll,
         )
+        try:
+            res = minimize(
+                params_distances_objective_extra_weight,
+                np.concatenate((rate_params, branch_lengths)),
+                args=(log_freq_params,),
+                method="L-BFGS-B",
+                bounds=[(min_rate_param, np.inf)] * num_rate_params
+                + [(0.0, np.maximum(min_branch_length / 2, 1e-10))]
+                + [(min_branch_length, np.inf)] * (num_branch_lens - 1),
+                callback=CallbackParam(print_period=10) if log else None,
+                options=dict(
+                    {"maxcor": np.minimum(200, num_rate_params + num_branch_lens)},
+                    **solver_options[options],
+                ),
+            )
+            best_nll = np.minimum(best_nll, res.fun)
+            if log:
+                print(res, flush=True)
 
-        branch_lengths[0] = 0.0
-        branch_lengths[1:] = np.clip(
-            np.nan_to_num(res.x[num_rate_params + 1 :]), min_branch_length, np.inf
-        )
+            rate_params = np.clip(np.nan_to_num(res.x[:num_rate_params]), min_rate_param, np.inf)
+            rate_params, branch_lengths = scale_params(
+                rate_params=rate_params,
+                branch_lengths=branch_lengths,
+                log_freq_params=log_freq_params,
+                ploidy=ploidy,
+                rate_constraint=rate_constraint,
+                final_rp_norm=final_rp_norm,
+            )
 
-    except ValueError:
-        pass
+            branch_lengths[0] = 0.0
+            branch_lengths[1:] = np.clip(
+                np.nan_to_num(res.x[num_rate_params + 1 :]), min_branch_length, np.inf
+            )
+
+        except ValueError:
+            pass
 
     ################################################################################
     # Optimize branch-lengths on joint mat/pat data, with strongest precision

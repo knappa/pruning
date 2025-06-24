@@ -1,4 +1,4 @@
-from typing import Callable, Tuple, Union
+from typing import Callable, Optional, Tuple, Union
 
 import numba
 import numpy as np
@@ -66,22 +66,29 @@ def sequence_distance(
     Q_sym_func: Callable,
     num_rate_params: int,
     ploidy: int,
+    rate_params: Optional[np.ndarray] = None,
 ) -> Tuple[float, float]:
     """
-    Unphased diploid version of the F81 distance
+    Distance between sequences computed in terms of a model.
+
     :param seq1: a sequence
     :param seq2: a sequence
     :param pis: base frequencies
     :param Q_sym_func: function which generates the symmetrized Q matrix (NOT the S matrix)
     :param num_rate_params: number of rate parameters as used in Q_sym_func
     :param ploidy: 1 for haploid, 2 for diploid
+    :param rate_params: explicitly set rate params. if not present, use all ones.
     :return: distance, variance of distance
     """
     from scipy.differentiate import derivative
     from scipy.linalg import expm
     from scipy.optimize import brentq
 
-    sym_Q = Q_sym_func(pis, np.ones(num_rate_params, dtype=np.float64))
+    if rate_params is not None:
+        assert len(rate_params.shape) == 1 and rate_params.shape[0] == num_rate_params
+        sym_Q = Q_sym_func(pis, rate_params)
+    else:
+        sym_Q = Q_sym_func(pis, np.ones(num_rate_params, dtype=np.float64))
     Q = sym_Q / np.sqrt(pis)[:, None] * np.sqrt(pis)
     mu = -(pis @ np.diag(Q))
     beta = 1 / mu
