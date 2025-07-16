@@ -25,6 +25,9 @@ parser.add_argument(
 parser.add_argument(
     "--death_rate", type=float, required=False, help="death rate (Ohtsaki Innan 2017)"
 )
+parser.add_argument(
+    "--transforming_branch_len", type=float, required=False, help="transforming branch len"
+)
 parser.add_argument("--somatic_mut_rate", type=float, required=True, help="somatic mutation rate")
 parser.add_argument("--lin_rate_var", type=float, required=False, help="lineage rate variation")
 parser.add_argument("--doublet_rate_mean", type=float, default=0.0, help="doublet rate mean")
@@ -124,6 +127,12 @@ BIRTH_RATE = (
 DEATH_RATE = (
     opt.death_rate if hasattr(opt, "death_rate") and opt.death_rate is not None else float("-inf")
 )
+TRANSFORMING_BRANCH_LEN = (
+    opt.transforming_branch_len
+    if hasattr(opt, "transforming_branch_len") and opt.transforming_branch_len is not None
+    else float("-inf")
+)
+
 SOMATIC_MUT_RATE = opt.somatic_mut_rate
 LINEAGE_RATE_VARIATION = (
     opt.lin_rate_var
@@ -212,6 +221,10 @@ def params(user_genome_filename):
         # "-#" + str(SEED),
         "-y0",
     ]
+    if TRANSFORMING_BRANCH_LEN > 0.0:
+        params += [
+            "-k" + str(TRANSFORMING_BRANCH_LEN),
+        ]
     if DOUBLET_RATE_MEAN > 0.0:
         params += [
             "-B" + str(DOUBLET_RATE_MEAN),
