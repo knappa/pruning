@@ -14,7 +14,7 @@ do
   do
     for NSITES in 1000 10000
     do
-      seq 0 99 | parallel --line-buffer --sshlogin kirby,brouwer,riemann,: -I {} \
+      seq 0 99 | parallel --line-buffer --sshdelay 0.1 --sshlogin kirby,brouwer,riemann,: -I {} \
         ~/pruning/scripts/run-10-models-ssh-helper.sh "$NSITES" {} "$SEQ_ERR" "$ADO"
     done
   done
