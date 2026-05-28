@@ -1,0 +1,3 @@
+[submodule "cellcoal"]
+	path = cellcoal
+	url = git@github.com:dapogon/cellcoal.git
