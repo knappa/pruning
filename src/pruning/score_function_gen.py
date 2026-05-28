@@ -78,8 +78,8 @@ def compute_score_function_helper(
     assert len(node.children) == 2
     left_node, right_node = node.children
 
-    left_leaf_names = set(leaf.name for leaf in left_node.iter_leaves())
-    right_leaf_names = set(leaf.name for leaf in right_node.iter_leaves())
+    left_leaf_names = set(leaf.name for leaf in left_node.leaves())
+    right_leaf_names = set(leaf.name for leaf in right_node.leaves())
 
     left_leaf_idcs = tuple(
         [idx for leaf_name, idx in taxa_indices_.items() if leaf_name in left_leaf_names]
@@ -147,6 +147,7 @@ def compute_score_function_helper(
 def compute_score_function(
     *, root, patterns, pattern_counts, num_states, taxa_indices, node_indices
 ) -> Callable:
+    """Compile a Felsenstein pruning score function (negative log-likelihood) for the given tree and site patterns."""
     # print(f"compute_score_function({root=},{patterns=},{pattern_counts=})")
     v_function = compute_score_function_helper(
         root, patterns, taxa_indices, num_states, node_indices
@@ -165,7 +166,7 @@ def compute_score_function(
 def compute_factored_score_function(
     *, root, patterns, pattern_counts, num_states, taxa_indices, node_indices
 ) -> Tuple[Callable, Callable]:
-
+    """Compile separate maternal and paternal Felsenstein pruning score functions by splitting 16-state patterns into independent 4-state patterns."""
     # separate maternal and paternal patterns
     maternal_patterns, paternal_patterns = np.divmod(patterns, 5)
 
@@ -220,6 +221,7 @@ def neg_log_likelihood_prototype(
     prob_model_maker,
     score_function,
 ):
+    """Compute negative log-likelihood by constructing probability matrices from the model and evaluating the score function."""
     prob_model = prob_model_maker(np.exp(log_freq_params), model_params, vec=True)
     prob_matrices = prob_model(tree_distances)
     return score_function(log_freq_params, prob_matrices)

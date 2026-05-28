@@ -4,23 +4,19 @@ def main_cli():
     import os.path
     import sys
     from collections import defaultdict
-    from contextlib import redirect_stdout
+    from contextlib import nullcontext, redirect_stdout
 
     import numpy as np
-    from ete3 import Tree
+    from ete4 import Tree
 
-    from pruning.fit import (
-        compute_initial_tree_distance_estimates,
-        fit_model,
-        gtr10z_to_gtr10,
-        print_states,
-        save_as_newick,
-    )
+    from pruning.fit import fit_model
+    from pruning.initialization import compute_initial_tree_distance_estimates
     from pruning.matrices import (
         cellphy10_rate,
         gtr4_rate,
         gtr10_rate,
         gtr10z_rate,
+        gtr10z_to_gtr10,
         make_cellphy_prob_model,
         make_gtr10_prob_model,
         make_gtr10z_prob_model,
@@ -30,10 +26,11 @@ def main_cli():
         make_unphased_GTRsq_prob_model,
         phased_mp_rate,
         phased_rate,
-        pi10s_to_pi4s,
         unphased_freq_param_cleanup,
         unphased_rate,
+        unphased_to_gtr10z,
     )
+    from pruning.output import print_states, save_as_newick
     from pruning.read_sequences import read_sequences
     from pruning.score_function_gen import compute_score_function, neg_log_likelihood_prototype
     from pruning.util import rate_param_cleanup, rate_param_scale
@@ -97,7 +94,7 @@ def main_cli():
         exit(-1)
 
     force_ploidy: int = opt.ploidy
-    final_rp_norm: bool = opt.final_rp_norm if hasattr(opt, "final_rp_norm") else False
+    final_rp_norm: bool = opt.final_rp_norm
 
     ################################################################################
     # read the true tree
@@ -133,7 +130,7 @@ def main_cli():
     ), "not the same leaves! are these matching datasets?"
 
     taxa = sorted(sequences_16state.keys())
-    taxa_indices = dict(map(lambda pair_: pair_[::-1], enumerate(taxa)))
+    taxa_indices = {taxon: idx for idx, taxon in enumerate(taxa)}
 
     # assemble the site pattern count tensors (sparse)
     counts_16state = defaultdict(lambda: 0)
@@ -191,7 +188,7 @@ def main_cli():
     # comparable, but possibly good to have
     true_branch_lens = np.zeros(num_tree_nodes, dtype=np.float64)
     for node in true_tree.traverse():
-        true_branch_lens[node_indices[node.name]] = node.dist
+        true_branch_lens[node_indices[node.name]] = node.dist or 0.0
 
     ##########################################################################################
     # Fit a 4 state model
@@ -234,7 +231,7 @@ def main_cli():
         final_rp_norm=final_rp_norm,
     )
 
-    if hasattr(opt, "output") and opt.output is not None:
+    if opt.output:
         save_as_newick(
             branch_lengths=branch_lengths_4state,
             scale=(
@@ -292,7 +289,7 @@ def main_cli():
         final_rp_norm=final_rp_norm,
     )
 
-    if hasattr(opt, "output") and opt.output is not None:
+    if opt.output:
         save_as_newick(
             branch_lengths=branch_lengths_unphased,
             scale=(
@@ -350,7 +347,7 @@ def main_cli():
         final_rp_norm=final_rp_norm,
     )
 
-    if hasattr(opt, "output") and opt.output is not None:
+    if opt.output:
         save_as_newick(
             branch_lengths=branch_lengths_cellphy,
             scale=(
@@ -374,38 +371,6 @@ def main_cli():
     freq_params_gtr10z = seq_pi10
     with np.errstate(divide="ignore"):
         log_freq_params_gtr10z = np.clip(np.log(freq_params_gtr10z), -1e100, 0.0)
-
-    def unphased_to_gtr10z(pis10, rate_params):
-        pi_a, pi_c, pi_g, pi_t = pi10s_to_pi4s(pis10)
-        s_ac, s_ag, s_at, s_cg, s_ct, s_gt = np.clip(rate_params, 0.0, np.inf)
-        return np.array(
-            [
-                s_ac / pi_a,
-                s_ag / pi_a,
-                s_at / pi_a,
-                s_ac / pi_c,
-                s_cg / pi_c,
-                s_ct / pi_c,
-                s_ag / pi_g,
-                s_cg / pi_g,
-                s_gt / pi_g,
-                s_at / pi_t,
-                s_ct / pi_t,
-                s_gt / pi_t,
-                s_cg / (2 * pi_a),
-                s_ct / (2 * pi_a),
-                s_ag / (2 * pi_c),
-                s_at / (2 * pi_c),
-                s_gt / (2 * pi_a),
-                s_ac / (2 * pi_g),
-                s_at / (2 * pi_g),
-                s_ac / (2 * pi_t),
-                s_ag / (2 * pi_t),
-                s_gt / (2 * pi_c),
-                s_ct / (2 * pi_g),
-                s_cg / (2 * pi_t),
-            ]
-        )
 
     rate_params_gtr10z = unphased_to_gtr10z(freq_params_gtr10z, rate_params_unphased)
     if final_rp_norm:
@@ -441,7 +406,7 @@ def main_cli():
         final_rp_norm=final_rp_norm,
     )
 
-    if hasattr(opt, "output") and opt.output is not None:
+    if opt.output:
         save_as_newick(
             branch_lengths=branch_lengths_gtr10z,
             scale=(
@@ -500,7 +465,7 @@ def main_cli():
         final_rp_norm=final_rp_norm,
     )
 
-    if hasattr(opt, "output") and opt.output is not None:
+    if opt.output:
         save_as_newick(
             branch_lengths=branch_lengths_gtr10,
             scale=(
@@ -559,7 +524,7 @@ def main_cli():
         final_rp_norm=final_rp_norm,
     )
 
-    if hasattr(opt, "output") and opt.output is not None:
+    if opt.output:
         save_as_newick(
             branch_lengths=branch_lengths_16state,
             scale=(
@@ -618,7 +583,7 @@ def main_cli():
         final_rp_norm=final_rp_norm,
     )
 
-    if hasattr(opt, "output") and opt.output is not None:
+    if opt.output:
         save_as_newick(
             branch_lengths=branch_lengths_16state_mp,
             scale=(
@@ -637,33 +602,10 @@ def main_cli():
 
     ################################################################################
 
-    if hasattr(opt, "output") and opt.output is not None:
-        with open(opt.output + ".csv", "w") as file:
-            with redirect_stdout(file):
-                print_states(
-                    freq_params_4state,
-                    rate_params_4state,
-                    nll_4state,
-                    freq_params_unphased,
-                    rate_params_unphased,
-                    nll_unphased,
-                    freq_params_cellphy,
-                    rate_params_cellphy,
-                    nll_cellphy,
-                    freq_params_gtr10z,
-                    rate_params_gtr10z,
-                    nll_gtr10z,
-                    freq_params_gtr10,
-                    rate_params_gtr10,
-                    nll_gtr10,
-                    freq_params_16state,
-                    rate_params_16state,
-                    nll_16state,
-                    freq_params_16state_mp,
-                    rate_params_16state_mp,
-                    nll_16state_mp,
-                )
-    else:
+    with (
+        open(opt.output + ".csv", "w") if opt.output else nullcontext(sys.stdout) as file,
+        redirect_stdout(file),
+    ):
         print_states(
             freq_params_4state,
             rate_params_4state,

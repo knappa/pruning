@@ -47,8 +47,15 @@ which should output documentation on the command line options for the newly inst
 
 ## Usage
 
-3 utilities
-pruning            pruning_halfstack  pruning_stack
+There are 3 utilities: `pruning`, `pruning_stack`, and `pruning_halfstack`. The `pruning` utility fits a single user-specified model. The `pruning_stack` utility fits all seven models in a single run using the warm-start chain shown below, and writes a single CSV comparing NLL and parameters across all models.
+
+![pruning_stack warm-start chain](images/pruning_stack_chain.svg)
+
+The `pruning_halfstack` utility fits only the six unphased 10-state models, skipping the 4-state and 16-state phased models, using the warm-start chain shown below.
+
+![pruning_halfstack warm-start chain](images/pruning_halfstack_chain.svg)
+
+The `pruning_stack` and `pruning_halfstack` utilities do not take a `--model` argument, as they run a fixed set of models. All three utilities share the optional options described below.
 
 ### pruning
 
@@ -63,7 +70,7 @@ The pruning utility has a number of options.
   * `PHASED_DNA16` a GTR4$^{\oplus 2}$ model. i.e. a model on phased DNA (16 state) in which the maternal and paternal strands evolve independently according to the same GTR4 model.
   * `PHASED_DNA16_MP` a GTR4$\oplus$GTR4 model. i.e. a model on phased DNA (16 state) in which the maternal and paternal strands evolve independently according to (possibly distinct) GTR4 models.
   * `UNPHASED_DNA` a model of unphased maternal/paternal DNA (10 state) obtained by lumping phased maternal/paternal pairs to unphased pairs. e.g. A|C and C|A are identified with the unphased pair A/C   
-  * `CELLPHY` another model on unphased DNA (10 state) as described in TODO: cite
+  * `CELLPHY` another model on unphased DNA (10 state) as described in Kozlov et al. (2022) *CellPhy: accurate and fast probabilistic inference of single-cell phylogenies from scDNA-seq data*, Genome Biology 23:37. https://doi.org/10.1186/s13059-021-02583-w
   * `GTR10` the general time reversible model on 10 states, applied to unphased DNA. State order: AA, CC, GG, TT, AC, AG, AT, CG, CT, GT.
   * `GTR10Z` a submodel of `GTR10` in which the rates of all double-transitions (e.g. the rates of AA$\to$CC or CT$\to$AG) are fixed at zero. Note that both the `UNPHASED_DNA` and `CELLPHY` models are submodels of `GTR10Z`.
 
@@ -89,3 +96,4 @@ The pruning utility has a number of options.
 command line options for each and their purpose
 
 ## Included scripts
+

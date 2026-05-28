@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, cast
 
 
 def rate_param_objective_prototype(
@@ -99,10 +99,9 @@ def param_objective_prototype(
     from scipy.special import logsumexp
 
     log_freq_params = params[:num_freq_params]
-    freq_error = logsumexp(log_freq_params)
+    freq_error = cast(float, logsumexp(log_freq_params))
     log_freq_params -= freq_error
     # should be a probability dist
-    # noinspection PyTypeChecker
     loss = constraint_weight * freq_error**2
 
     rate_params = np.clip(params[num_freq_params:], 0.0, np.inf)
@@ -153,11 +152,10 @@ def full_objective_prototype(
     from scipy.special import logsumexp
 
     log_freq_params = params[:num_freq_params]
-    freq_error = logsumexp(log_freq_params)
+    freq_error = cast(float, logsumexp(log_freq_params))
     log_freq_params -= freq_error
 
     # should be a probability dist
-    # noinspection PyTypeChecker
     loss: float = constraint_weight * freq_error**2
 
     rate_params = np.clip(params[num_freq_params : num_freq_params + num_rate_params], 0.0, np.inf)

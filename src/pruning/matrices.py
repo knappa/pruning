@@ -1788,3 +1788,123 @@ def unphased_freq_param_cleanup(freq_params):
     :return:
     """
     return pi4s_to_unphased_pi10s(pi10s_to_pi4s(freq_params))
+
+
+def unphased_to_gtr10z(pis10, rate_params):
+    """Convert 6 UNPHASED_DNA rate params to the 24-element GTR10Z rate vector."""
+    pi_a, pi_c, pi_g, pi_t = pi10s_to_pi4s(pis10)
+    s_ac, s_ag, s_at, s_cg, s_ct, s_gt = np.clip(rate_params, 0.0, np.inf)
+    return np.array(
+        [
+            s_ac / pi_a,
+            s_ag / pi_a,
+            s_at / pi_a,
+            s_ac / pi_c,
+            s_cg / pi_c,
+            s_ct / pi_c,
+            s_ag / pi_g,
+            s_cg / pi_g,
+            s_gt / pi_g,
+            s_at / pi_t,
+            s_ct / pi_t,
+            s_gt / pi_t,
+            s_cg / (2 * pi_a),
+            s_ct / (2 * pi_a),
+            s_ag / (2 * pi_c),
+            s_at / (2 * pi_c),
+            s_gt / (2 * pi_a),
+            s_ac / (2 * pi_g),
+            s_at / (2 * pi_g),
+            s_ac / (2 * pi_t),
+            s_ag / (2 * pi_t),
+            s_gt / (2 * pi_c),
+            s_ct / (2 * pi_g),
+            s_cg / (2 * pi_t),
+        ]
+    )
+
+
+def cellphy_to_gtr10z(rate_params):
+    """Convert 6 CELLPHY rate params to the 24-element GTR10Z rate vector."""
+    s_ac, s_ag, s_at, s_cg, s_ct, s_gt = np.clip(rate_params, 0.0, np.inf)
+    return np.array(
+        [
+            s_ac,
+            s_ag,
+            s_at,
+            s_ac,
+            s_cg,
+            s_ct,
+            s_ag,
+            s_cg,
+            s_gt,
+            s_at,
+            s_ct,
+            s_gt,
+            s_cg,
+            s_ct,
+            s_ag,
+            s_at,
+            s_gt,
+            s_ac,
+            s_at,
+            s_ac,
+            s_ag,
+            s_gt,
+            s_ct,
+            s_cg,
+        ]
+    )
+
+
+def gtr10z_to_gtr10(s):
+    """Expand a 24-element GTR10Z rate vector to the 45-element GTR10 vector, inserting zeros for double-transition rates."""
+    return np.array(
+        [
+            0,  # AA -> CC
+            0,  # AA -> GG
+            0,  # AA -> TT
+            s[0],  # AA -> AC
+            s[1],  # AA -> AG
+            s[2],  # AA -> AT
+            0,  # AA -> CG
+            0,  # AA -> CT
+            0,  # AA -> GT
+            0,  # CC -> GG
+            0,  # CC -> TT
+            s[3],  # CC -> AC
+            0,  # CC -> AG
+            0,  # CC -> AT
+            s[4],  # CC -> CG
+            s[5],  # CC -> CT
+            0,  # CC -> GT
+            0,  # GG -> TT
+            0,  # GG -> AC
+            s[6],  # GG -> AG
+            0,  # GG -> AT
+            s[7],  # GG -> CG
+            0,  # GG -> CT
+            s[8],  # GG -> GT
+            0,  # TT -> AC
+            0,  # TT -> AG
+            s[9],  # TT -> AT
+            0,  # TT -> CG
+            s[10],  # TT -> CT
+            s[11],  # TT -> GT
+            s[12],  # AC -> AG
+            s[13],  # AC -> AT
+            s[14],  # AC -> CG
+            s[15],  # AC -> CT
+            0,  # AC -> GT
+            s[16],  # AG -> AT
+            s[17],  # AG -> CG
+            0,  # AG -> CT
+            s[18],  # AG -> GT
+            0,  # AT -> CG
+            s[19],  # AT -> CT
+            s[20],  # AT -> GT
+            s[21],  # CG -> CT
+            s[22],  # CG -> GT
+            s[23],  # CT -> GT
+        ]
+    )

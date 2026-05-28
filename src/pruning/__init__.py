@@ -7,15 +7,10 @@ def main_cli():
     from collections import defaultdict
 
     import numpy as np
-    from ete3 import Tree
+    from ete4 import Tree
 
-    from pruning.fit import (
-        compute_initial_tree_distance_estimates,
-        fit_factored_model,
-        fit_model,
-        print_states,
-        save_as_newick,
-    )
+    from pruning.fit import fit_factored_model, fit_model
+    from pruning.initialization import compute_initial_tree_distance_estimates
     from pruning.matrices import (
         cellphy10_rate,
         gtr4_rate,
@@ -30,32 +25,17 @@ def main_cli():
         make_unphased_GTRsq_prob_model,
         phased_mp_rate,
         phased_rate,
-        pi4s_to_unphased_pi10s,
-        pi10s_to_pi4s,
         unphased_freq_param_cleanup,
         unphased_rate,
     )
-    from pruning.objective_functions import (
-        branch_length_objective_prototype,
-        param_objective_prototype,
-        rate_param_objective_prototype,
-        rates_distances_objective_prototype,
-    )
-    from pruning.path_constraints import make_path_constraints
+    from pruning.output import save_as_newick
     from pruning.read_sequences import read_sequences
     from pruning.score_function_gen import (
         compute_factored_score_function,
         compute_score_function,
         neg_log_likelihood_prototype,
     )
-    from pruning.util import (
-        CallbackParam,
-        kahan_dot,
-        log_dot,
-        log_matrix_mult,
-        rate_param_cleanup,
-        rate_param_scale,
-    )
+    from pruning.util import rate_param_cleanup, rate_param_scale
 
     parser = argparse.ArgumentParser(
         description="Compute log likelihood using the pruning algorithm"
@@ -304,7 +284,7 @@ def main_cli():
     ), "not the same leaves! are these matching datasets?"
 
     taxa = sorted(sequences_16state.keys())
-    taxa_indices = dict(map(lambda pair_: pair_[::-1], enumerate(taxa)))
+    taxa_indices = {taxon: idx for idx, taxon in enumerate(taxa)}
 
     # assemble the site pattern count tensor (sparse)
     # noinspection PyUnreachableCode
@@ -335,15 +315,16 @@ def main_cli():
 
     true_branch_lens = np.zeros(num_tree_nodes, dtype=np.float64)
     for node in true_tree.traverse():
-        true_branch_lens[node_indices[node.name]] = node.dist
+        true_branch_lens[node_indices[node.name]] = node.dist or 0.0
 
     ################################################################################
     # initial estimates for branch lengths based on (generalized) F81 distances
 
+    pis = np.kron(freq_params, freq_params) if model == "PHASED_DNA16_4" else freq_params
     branch_lengths_init = compute_initial_tree_distance_estimates(
         node_indices=node_indices,
         num_tree_nodes=num_tree_nodes,
-        pis=freq_params if model != "PHASED_DNA16_4" else np.kron(freq_params, freq_params),
+        pis=pis,
         sequences=sequences,
         taxa=taxa,
         true_tree=true_tree,

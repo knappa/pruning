@@ -123,7 +123,7 @@ def sequence_distance(
         while expected_mutations(upper_bound) <= disagreement:
             upper_bound += step
 
-        branch_length, convergence_result = brentq(
+        branch_length, _ = brentq(
             lambda nu: disagreement - expected_mutations(nu),
             lower_bound,
             upper_bound,

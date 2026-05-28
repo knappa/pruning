@@ -1,20 +1,25 @@
 from collections import defaultdict
+from typing import cast
 
 import numpy as np
 from scipy.special import logsumexp
 
 
 def log_matrix_mult(v, P) -> np.ndarray:
-    # noinspection PyTypeChecker
-    return logsumexp(np.expand_dims(v, axis=-1) + P, axis=-2, return_sign=False, keepdims=False)
+    """Log-space matrix-vector product: log(exp(v) @ exp(P)) via logsumexp."""
+    return cast(
+        np.ndarray,
+        logsumexp(np.expand_dims(v, axis=-1) + P, axis=-2, return_sign=False, keepdims=False),
+    )
 
 
 def log_dot(v, w) -> np.ndarray:
-    # noinspection PyTypeChecker
-    return logsumexp(v + w, axis=-1, return_sign=False, keepdims=False)
+    """Log-space dot product: log(dot(exp(v), exp(w))) via logsumexp."""
+    return cast(np.ndarray, logsumexp(v + w, axis=-1, return_sign=False, keepdims=False))
 
 
 def kahan_dot(v: np.ndarray, w: np.ndarray):
+    """Dot product with Kahan compensated summation for numerical stability."""
     accumulator = np.float64(0.0)
     compensator = np.float64(0.0)
     for idx in range(v.shape[-1]):
@@ -26,13 +31,11 @@ def kahan_dot(v: np.ndarray, w: np.ndarray):
 
 
 def np_full_print(nparray, flush=False):
+    import sys
     from shutil import get_terminal_size
 
-    from numpy import inf, printoptions
-
-    # noinspection PyTypeChecker
-    with printoptions(
-        threshold=inf,
+    with np.printoptions(
+        threshold=sys.maxsize,
         linewidth=get_terminal_size((80, 20)).columns,
         suppress=True,
     ):
@@ -202,11 +205,13 @@ def print_cellphy10_params(s_est, pis_est):
 
 
 def rate_param_scale(*, x, log_freq_params, ploidy, rate_constraint) -> float:
+    """Return the scale factor needed to normalize rate_params so that mu = ploidy."""
     rate_params = np.maximum(0.0, x)
     return ploidy / rate_constraint(np.exp(log_freq_params), rate_params)
 
 
 def rate_param_cleanup(*, x, log_freq_params, ploidy, rate_constraint):
+    """Return rate_params rescaled so that mu = ploidy."""
     rate_params = np.maximum(0.0, x)
     return rate_params * ploidy / rate_constraint(np.exp(log_freq_params), rate_params)
 

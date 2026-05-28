@@ -1,4 +1,5 @@
 def read_sequences(ambig_char, sequence_file, log=False):
+    """Parse a phylip file with space-delimited diploid pairs; return site count, state frequencies, and sequences in 4-, 10-, and 16-state encodings."""
     import numpy as np
 
     from pruning.matrices import V, perm
