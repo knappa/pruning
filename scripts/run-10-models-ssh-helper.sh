@@ -42,7 +42,7 @@ pruning \
 pruning \
   --seqs "$PARENT_DIR"/diploid-jp-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/diploid-"$IDX".phy \
   --tree "$PARENT_DIR"/diploid-jp-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/tree-"$IDX".nwk \
-  --output "$PARENT_DIR"/diploid-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-phased_dna16_4-"$IDX" \
+  --output "$PARENT_DIR"/diploid-jp-sites-"$NSITES"-seq-err-"$SEQ_ERR"-ado-"$ADO"/reconstructed-tree-phased_dna16_4-"$IDX" \
   --model PHASED_DNA16_4 \
   --log
 

@@ -8,9 +8,9 @@
 # SEQ_ERR=0.00
 # ADO=0.00
 
-for SEQ_ERR in 0.00 0.01
+for SEQ_ERR in 0.00
 do
-  for ADO in 0.00 0.25
+  for ADO in 0.00
   do
     for NSITES in 1000 10000
     do
