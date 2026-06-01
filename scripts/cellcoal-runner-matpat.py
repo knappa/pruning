@@ -2,12 +2,12 @@
 # coding: utf-8
 import argparse
 import math
-import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
-import ete3
+import ete4
 import numpy as np
 
 parser = argparse.ArgumentParser(
@@ -26,16 +26,19 @@ parser.add_argument(
     "--death_rate", type=float, required=False, help="death rate (Ohtsaki Innan 2017)"
 )
 parser.add_argument(
-    "--transforming_branch_len", type=float, required=False, help="transforming branch len"
+    "--transforming_branch_len",
+    type=float,
+    required=False,
+    help="transforming branch len",
 )
 parser.add_argument("--somatic_mut_rate", type=float, required=True, help="somatic mutation rate")
 parser.add_argument("--lin_rate_var", type=float, required=False, help="lineage rate variation")
 parser.add_argument("--doublet_rate_mean", type=float, default=0.0, help="doublet rate mean")
 parser.add_argument("--doublet_rate_var", type=float, default=0.0, help="doublet rate variation")
-parser.add_argument("--ado", type=float, required=True, help="Allelic dropout")
-parser.add_argument("--amp_err_mean", type=float, required=True, help="Amplification error mean")
-parser.add_argument("--amp_err_var", type=float, required=True, help="Amplification error variance")
-parser.add_argument("--seq_err", type=float, required=True, help="Sequencing error")
+parser.add_argument("--ado", type=float, default=0.0, help="Allelic dropout")
+parser.add_argument("--amp_err_mean", type=float, default=0.0, help="Amplification error mean")
+parser.add_argument("--amp_err_var", type=float, default=0.0, help="Amplification error variance")
+parser.add_argument("--seq_err", type=float, default=0.0, help="Sequencing error")
 parser.add_argument("--gamma", type=float, required=False, help="Rate var sites Gamma")
 parser.add_argument("--delete_vcf", action="store_true", help="Delete generated VCF files")
 parser.add_argument(
@@ -52,7 +55,8 @@ parser.add_argument(
     default=0.0,
     help="proportion of maternal/paternal sites that are forced matches (in addition to coincidental matches)",
 )
-parser.add_argument(
+mut_matrix_group = parser.add_mutually_exclusive_group()
+mut_matrix_group.add_argument(
     "--mut_matrix",
     type=float,
     nargs=16,
@@ -74,16 +78,23 @@ parser.add_argument(
     ),
     help="mutation matrix ACGTxACGT (default GTnR)",
 )
+mut_matrix_group.add_argument(
+    "--gtr_rate_params",
+    type=float,
+    nargs=6,
+    metavar=("s_ac", "s_ag", "s_at", "s_cg", "s_ct", "s_gt"),
+    help="GTR4 rate parameters (AC, AG, AT, CG, CT, GT); mutually exclusive with --mut_matrix",
+)
 
 # version number is the x.y.z part. This makes assumptions about the current working directory.
 parser.add_argument(
     "--cellcoal",
     type=str,
-    default="../cellcoal-modified/bin/cellcoal-1.3.0",
+    default="../cellcoal/bin/cellcoal-1.3.4",
     help="cellcoal binary location",
 )
 
-parser.add_argument("--output", type=str, help="output filename prefix for tree")
+parser.add_argument("--output_dir", type=str, help="output directory (default: current directory)", default=".")
 parser.add_argument("--log", action="store_true")
 
 if hasattr(sys, "ps1"):
@@ -91,10 +102,6 @@ if hasattr(sys, "ps1"):
         "--ncells 10 "
         "--nsamples 10 "
         "--nsites 1000 "
-        "--ado 0 "
-        "--amp_err_mean 0 "
-        "--amp_err_var 0 "
-        "--seq_err 0 "
         "--log".split()
     )
 else:
@@ -110,35 +117,46 @@ ALLELIC_DROPOUT = opt.ado
 AMPLIFICATION_ERROR_MEAN = opt.amp_err_mean
 AMPLIFICATION_ERROR_VARIANCE = opt.amp_err_var
 SEQUENCING_ERROR = opt.seq_err
-RATE_VAR_SITES_GAMMA_PARAM = (
-    opt.gamma if hasattr(opt, "gamma") and opt.gamma is not None else float("-inf")
-)
+RATE_VAR_SITES_GAMMA_PARAM = opt.gamma if opt.gamma is not None else float("-inf")
 NUC_BASE_FREQ = opt.base_freqs
-MUT_MATRIX = np.array(opt.mut_matrix, dtype=np.float64).reshape(4, 4)
+
+OUTPUT_DIR = Path(opt.output_dir).resolve()
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+def make_cellcoal_gtr(ss, pis):
+    # cellcoal wants zeros on the diagonal, even though this isn't the actual Q matrix.
+    return np.array(
+        [
+            # fmt: off
+            [           0.0, ss[0] * pis[1], ss[1] * pis[2], ss[2] * pis[3]],
+            [ss[0] * pis[0],            0.0, ss[3] * pis[2], ss[4] * pis[3]],
+            [ss[1] * pis[0], ss[3] * pis[1],            0.0, ss[5] * pis[3]],
+            [ss[2] * pis[0], ss[4] * pis[1], ss[5] * pis[2],            0.0],
+            # fmt: on
+        ],
+        dtype=np.float64,
+    )
+
+
+MUT_MATRIX = (
+    make_cellcoal_gtr(opt.gtr_rate_params, NUC_BASE_FREQ)
+    if opt.gtr_rate_params is not None
+    else np.array(opt.mut_matrix, dtype=np.float64).reshape(4, 4)
+)
+if opt.gtr_rate_params is not None:
+    # remove default to avoid confusion
+    opt.mut_matrix = None
+    
 EFFECTIVE_POP_SIZE = opt.eff_pop
-EXPONENTIAL_GROWTH_RATE = (
-    opt.exp_growth_rate
-    if hasattr(opt, "exp_growth_rate") and opt.exp_growth_rate is not None
-    else float("-inf")
-)
-BIRTH_RATE = (
-    opt.birth_rate if hasattr(opt, "birth_rate") and opt.birth_rate is not None else float("-inf")
-)
-DEATH_RATE = (
-    opt.death_rate if hasattr(opt, "death_rate") and opt.death_rate is not None else float("-inf")
-)
+EXPONENTIAL_GROWTH_RATE = opt.exp_growth_rate if opt.exp_growth_rate is not None else float("-inf")
+BIRTH_RATE = opt.birth_rate if opt.birth_rate is not None else float("-inf")
+DEATH_RATE = opt.death_rate if opt.death_rate is not None else float("-inf")
 TRANSFORMING_BRANCH_LEN = (
-    opt.transforming_branch_len
-    if hasattr(opt, "transforming_branch_len") and opt.transforming_branch_len is not None
-    else float("-inf")
+    opt.transforming_branch_len if opt.transforming_branch_len is not None else float("-inf")
 )
 
 SOMATIC_MUT_RATE = opt.somatic_mut_rate
-LINEAGE_RATE_VARIATION = (
-    opt.lin_rate_var
-    if hasattr(opt, "lin_rate_var") and opt.lin_rate_var is not None
-    else float("-inf")
-)
+LINEAGE_RATE_VARIATION = opt.lin_rate_var if opt.lin_rate_var is not None else float("-inf")
 DOUBLET_RATE_MEAN = opt.doublet_rate_mean
 DOUBLET_RATE_VAR = opt.doublet_rate_var
 
@@ -146,10 +164,8 @@ CELLCOAL_BIN = opt.cellcoal
 
 DEBUG = opt.log
 
-# # ## Cellcoal parameters
-# #
-# # See https://dapogon.github.io/cellcoal/cellcoal.manual.v1.1.html#63_mutation_models for parameters
-# #
+# ## Cellcoal parameters
+# See https://dapogon.github.io/cellcoal/cellcoal.manual.v1.1.html#63_mutation_models for parameters
 
 NUM_REPLICATES = 1
 ALPHABET_DNA = True
@@ -174,7 +190,7 @@ AMPLIFICATION_ERROR = [
 #
 
 
-DELETE_VCF_FILES = opt.delete_vcf if hasattr(opt, "delete_vcf") else False
+DELETE_VCF_FILES = opt.delete_vcf
 
 
 # reference for cell coal command line parameters:
@@ -249,110 +265,6 @@ def params(user_genome_filename):
     return params
 
 
-# | Symbol | Description               | | | | |Complement |
-# |:------:|:-------------------------:|-|-|-|-|----------:|
-# | A      | Adenine                   |A| | | |          T|
-# | C      | Cytosine                  | |C| | |          G|
-# | G      | Guanine                   | | |G| |          C|
-# | T      | Thymine                   | | | |T|          A|
-# | U      | Uracil                    | | | |U|          A|
-# | W      | Weak                      |A| | |T|          W|
-# | S      | Strong                    | |C|G| |          S|
-# | M      | aMino                     |A|C| | |          K|
-# | K      | Keto                      | | |G|T|          M|
-# | R      | puRine                    |A| |G| |          Y|
-# | Y      | pYrimidine                | |C| |T|          R|
-# | B      | not A                     | |C|G|T|          V|
-# | D      | not C                     |A| |G|T|          H|
-# | H      | not G                     |A|C| |T|          D|
-# | V      | not T                     |A|C|G| |          B|
-# | N      | any Nucleotide (not a gap)|A|C|G|T|          N|
-# | Z      | Zero                      | | | | |          Z|
-nucleotide_symbol_table = {
-    frozenset({"."}): "?",  # Gap symbol?
-    frozenset(): "Z",  # Is this also a gap, or just not a read?
-    frozenset({"A"}): "A",
-    frozenset({"C"}): "C",
-    frozenset({"G"}): "G",
-    frozenset({"T"}): "T",
-    frozenset({"U"}): "U",
-    frozenset({"N"}): "N",
-    frozenset({"A", "T"}): "W",
-    frozenset({"A", "U"}): "W",
-    frozenset({"C", "G"}): "S",
-    frozenset({"A", "C"}): "M",
-    frozenset({"G", "T"}): "K",
-    frozenset({"G", "U"}): "K",
-    frozenset({"A", "G"}): "R",
-    frozenset({"C", "T"}): "Y",
-    frozenset({"C", "U"}): "Y",
-    frozenset({"C", "G", "T"}): "B",
-    frozenset({"C", "G", "U"}): "B",
-    frozenset({"A", "G", "T"}): "D",
-    frozenset({"A", "G", "U"}): "D",
-    frozenset({"A", "C", "T"}): "H",
-    frozenset({"A", "C", "U"}): "H",
-    frozenset({"A", "C", "G"}): "V",
-    frozenset({"A", "C", "G", "T"}): "N",
-    frozenset({"A", "C", "G", "U"}): "N",
-}
-
-
-def nuc_set_to_letter(s) -> str:
-    """
-    translate a set of nucleotides to its IUPAC letter
-    """
-    global nucleotide_symbol_table
-    if "?" in s:
-        return "?"
-    fs = frozenset(s)
-    if fs in nucleotide_symbol_table:
-        return nucleotide_symbol_table[fs]
-    else:
-        raise RuntimeError(f"{s} an invalid nucleotide set")
-
-
-def to_10_state(st) -> str:
-    if "?" in st:
-        return "?"
-    if "N" in st:
-        return "N"  # we might want to deal with 'AN', etc. eventually, but it doesn't fit into the alphabet.
-    site = set(st)
-    return nuc_set_to_letter(site)
-
-
-def to_3_state(st, ref):
-    if "N" in st or "." in st or "?" in st:
-        return "?"  # undetermined, give gap symbol
-    if st[0] != st[1]:  # all heterozygous are 1
-        return 1
-    alt_count = 0
-    if st[0] != ref:
-        alt_count += 1
-    if st[1] != ref:
-        alt_count += 1
-    return alt_count
-
-
-def to_3_state_alt(st, ref):
-    if "N" in st or "." in st or "?" in st:
-        return "?"  # undetermined, give gap symbol
-    alt_count = 0
-    if st[0] != ref:
-        alt_count += 1
-    if st[1] != ref:
-        alt_count += 1
-    return alt_count
-
-
-def to_2_state(st, ref):
-    if "N" in st or "." in st or "?" in st:
-        return "?"  # undetermined, give gap symbol
-    elif st[0] == ref and st[1] == ref:
-        return 0
-    else:
-        return 1
-
 
 def generate_matpat():
     """
@@ -410,26 +322,33 @@ fasta_template = """> maternal
 {pat_genome}
 """
 
-fill_width = math.ceil(np.log10(NUM_SAMPLES + 1))
+fill_width = max(1, math.ceil(np.log10(NUM_SAMPLES + 1)))
 
 for biopsy_number in range(NUM_SAMPLES):
+    print(f"Sample {biopsy_number} started", end=" ... ")
+
     # `FILENAME_PREFIX` a prefix for all generated files
     FILENAME_PREFIX = f"tree-{str(biopsy_number).zfill(fill_width)}"
 
-    print(f"Sample {biopsy_number} started", end=" ... ")
-    newick_filename = f"{os.getcwd()}/{FILENAME_PREFIX}.nwk"
+    TREE_DIR = OUTPUT_DIR / f"{FILENAME_PREFIX}-files"
+    TREE_DIR.mkdir()
+
+    with open(TREE_DIR / "opts.txt", "w") as file:
+        for key, value in vars(opt).items():
+            file.write(f"{key} = {value}\n")
 
     # create the ancestral genome
     if opt.skewed_joint_seq > 0.0:
         mat_genome, pat_genome = generate_skewed_matpat(opt.skewed_joint_seq)
     else:
         mat_genome, pat_genome = generate_matpat()
-    fasta_filename = f"{os.getcwd()}/{FILENAME_PREFIX}-ancestral.fasta"
+    fasta_filename = TREE_DIR / f"{FILENAME_PREFIX}-ancestral.fasta"
     with open(fasta_filename, "w") as file:
         file.write(fasta_template.format(mat_genome=mat_genome, pat_genome=pat_genome))
 
     # run cellcoal
-    result = subprocess.run(params(fasta_filename), capture_output=True)
+    print(params(str(fasta_filename)))
+    result = subprocess.run(params(str(fasta_filename)), cwd=OUTPUT_DIR, capture_output=True)
     log = result.stdout.decode("utf-8") + result.stderr.decode("utf-8")
     if result.returncode > 0:
         print("Log: '" + log + "'")
@@ -441,145 +360,35 @@ for biopsy_number in range(NUM_SAMPLES):
         if DELETE_VCF_FILES:
             print("removing vcf files", end=" ... ")
             try:
-                shutil.rmtree(os.getcwd() + f"/Results/vcf_dir")
+                shutil.rmtree(OUTPUT_DIR / "Results" / "vcf_dir")
             except FileNotFoundError as e:
                 print(e)
                 pass
         print("complete.")
 
-    NEXUS_DIR = f"{os.getcwd()}/{FILENAME_PREFIX}-nexus-files"
-
-    # if os.path.isdir(NEXUS_DIR) or os.path.isfile(NEXUS_DIR):
-    #     try:
-    #         shutil.rmtree(NEXUS_DIR)
-    #     except Exception as e:
-    #         print(e)
-
-    os.mkdir(NEXUS_DIR)
-
-    # get ancestral genotype:
-    # out_root_maternal = None
-    # out_root_paternal = None
-    # in_root_maternal = None
-    # in_root_paternal = None
-    out_root_unphased = None
-    in_root_unphased = None
-    with open(f"{os.getcwd()}/Results/true_haplotypes_dir/true_hap.0001") as file:
-        for line in file:
-            # cellcoal-1.3:
-            if line[:8].strip() == "outgroot":
-                out_root_unphased = line[8:].strip()
-            elif line[:8] == "ingroot":
-                in_root_unphased = line[8:].strip()
-            # # cellcoal-1.1:
-            # if line[:9] == "outgrootm":
-            #     out_root_maternal = line[9:].strip()
-            # elif line[:9] == "outgrootp":
-            #     out_root_paternal = line[9:].strip()
-            # elif line[:9] == "ingrrootm":
-            #     in_root_maternal = line[9:].strip()
-            # elif line[:9] == "ingrrootp":
-            #     in_root_paternal = line[9:].strip()
-
-    # cellcoal-1.1:
-    # out_root_unphased = "".join(
-    #     [
-    #         nuc_set_to_letter({mat, pat})
-    #         for mat, pat in zip(out_root_maternal, out_root_paternal)
-    #     ]
-    # )
-    # in_root_unphased = "".join(
-    #     [
-    #         nuc_set_to_letter({mat, pat})
-    #         for mat, pat in zip(in_root_maternal, in_root_paternal)
-    #     ]
-    # )
-
-    reference = out_root_unphased
-
-    # # get observed snv genotypes:
-    # observed_sites_10_state_snv = dict()
-    # observed_sites_3_state_snv = dict()
-    # observed_sites_2_state_snv = dict()
-    # with open(os.getcwd() + "/Results/snv_genotypes_dir/snv_gen.0001") as file:
-    #     cell_count, num_sites = map(int, next(file).split())
-
-    #     # get locations of snvs and filter reference, for use with 3 and 2 state models
-    #     snv_locations = list(map(int, next(file).split()))
-    #     snv_reference = [reference[loc - 1] for loc in snv_locations]
-
-    #     for line in file:
-    #         cell_name, *genes = line.split()
-    #         observed_sites_10_state_snv[cell_name] = "".join(
-    #             [to_10_state(site) for site in genes]
-    #         )
-    #         observed_sites_3_state_snv[cell_name] = "".join(
-    #             map(
-    #                 str,
-    #                 [
-    #                     to_3_state(site, ref_site)
-    #                     for site, ref_site in zip(genes, snv_reference)
-    #                 ],
-    #             )
-    #         )
-    #         observed_sites_2_state_snv[cell_name] = "".join(
-    #             map(
-    #                 str,
-    #                 [
-    #                     to_2_state(site, ref_site)
-    #                     for site, ref_site in zip(genes, snv_reference)
-    #                 ],
-    #             )
-    #         )
-
     # get observed full genotypes:
     observed_sites_16_state = dict()
-    observed_sites_10_state = dict()
-    observed_sites_3_state = dict()
-    observed_sites_3_state_alt = dict()
-    observed_sites_2_state = dict()
-    with open(os.getcwd() + f"/Results/full_genotypes_dir/full_gen.0001") as file:
+    with open(OUTPUT_DIR / "Results" / "full_genotypes_dir" / "full_gen.0001") as file:
         cell_count, num_sites = map(int, next(file).split())
         for line in file:
             cell_name, *genes = line.split()
             observed_sites_16_state[cell_name] = " ".join(genes)
-            observed_sites_10_state[cell_name] = "".join(to_10_state(site) for site in genes)
-            observed_sites_3_state[cell_name] = "".join(
-                map(
-                    str,
-                    [to_3_state(site, ref_site) for site, ref_site in zip(genes, reference)],
-                )
-            )
-            observed_sites_3_state_alt[cell_name] = "".join(
-                map(
-                    str,
-                    [to_3_state_alt(site, ref_site) for site, ref_site in zip(genes, reference)],
-                )
-            )
-            observed_sites_2_state[cell_name] = "".join(
-                map(
-                    str,
-                    [to_2_state(site, ref_site) for site, ref_site in zip(genes, reference)],
-                )
-            )
 
     # copy the tree file
-    shutil.copyfile(os.getcwd() + "/Results/trees_dir/trees.0001", NEXUS_DIR + "/tree-outgcell.nwk")
+    shutil.copyfile(OUTPUT_DIR / "Results" / "trees_dir" / "trees.0001", TREE_DIR / "tree-outgcell.nwk")
 
     # make a tree file without the outgroup
-    with open(NEXUS_DIR + "/tree-no-outgcell.nwk", "w") as file:
-        tree = ete3.Tree(NEXUS_DIR + "/tree-outgcell.nwk")
-        tree.prune(
-            leaf for leaf in map(lambda lf: lf.name, tree.iter_leaves()) if leaf != "outgcell"
-        )
-        file.write(tree.write(format=5))
+    with open(TREE_DIR / "tree-no-outgcell.nwk", "w") as file:
+        tree = ete4.Tree(str(TREE_DIR / "tree-outgcell.nwk"))
+        tree.prune([leaf for leaf in map(lambda lf: lf.name, tree.leaves()) if leaf != "outgcell"])
+        file.write(tree.write())
         file.write("\n")
 
     # save the Results folder
-    shutil.move(os.getcwd() + "/Results", NEXUS_DIR)
+    shutil.move(OUTPUT_DIR / "Results", TREE_DIR)
 
     # write nexus for genotypes
-    with open(NEXUS_DIR + f"/16state.nex", "w") as file:
+    with open(TREE_DIR / "16state.nex", "w") as file:
         file.write(
             nexus_template.format(
                 NTAX=NCELLS_SAMPLE + 1,
@@ -593,7 +402,7 @@ for biopsy_number in range(NUM_SAMPLES):
                 ),
             )
         )
-    with open(NEXUS_DIR + f"/16state-nooutgcell.nex", "w") as file:
+    with open(TREE_DIR / "16state-nooutgcell.nex", "w") as file:
         file.write(
             nexus_template.format(
                 NTAX=NCELLS_SAMPLE,
@@ -610,140 +419,5 @@ for biopsy_number in range(NUM_SAMPLES):
             )
         )
 
-    print("16state", end=" ")
+    print("16state done")
 
-    with open(NEXUS_DIR + f"/10state.nex", "w") as file:
-        file.write(
-            nexus_template.format(
-                NTAX=NCELLS_SAMPLE + 1,
-                NCHAR=NUM_SITES,
-                SYMBOLS="",
-                DATATYPE="dna",
-                SITES="\n".join(
-                    "    " + cell_name.ljust(9) + " " + sites
-                    for cell_name, sites in observed_sites_10_state.items()
-                    if cell_name != "outgroot" and cell_name != "ingrroot"
-                ),
-            )
-        )
-
-    with open(NEXUS_DIR + f"/10state-nooutgcell.nex", "w") as file:
-        file.write(
-            nexus_template.format(
-                NTAX=NCELLS_SAMPLE,
-                NCHAR=NUM_SITES,
-                SYMBOLS="",
-                DATATYPE="dna",
-                SITES="\n".join(
-                    "    " + cell_name.ljust(9) + " " + sites
-                    for cell_name, sites in observed_sites_10_state.items()
-                    if cell_name != "outgcell"
-                    and cell_name != "outgroot"
-                    and cell_name != "ingrroot"
-                ),
-            )
-        )
-
-    print("10state", end=" ")
-
-    with open(NEXUS_DIR + f"/3state.nex", "w") as file:
-        file.write(
-            nexus_template.format(
-                NTAX=NCELLS_SAMPLE + 1,
-                NCHAR=NUM_SITES,
-                SYMBOLS='symbols="0 1 2"',
-                DATATYPE="standard",
-                SITES="\n".join(
-                    "    " + cell_name.ljust(9) + " " + sites
-                    for cell_name, sites in observed_sites_3_state.items()
-                    if cell_name != "outgroot" and cell_name != "ingrroot"
-                ),
-            )
-        )
-
-    with open(NEXUS_DIR + f"/3state-nooutgcell.nex", "w") as file:
-        file.write(
-            nexus_template.format(
-                NTAX=NCELLS_SAMPLE,
-                NCHAR=NUM_SITES,
-                SYMBOLS='symbols="0 1 2"',
-                DATATYPE="standard",
-                SITES="\n".join(
-                    "    " + cell_name.ljust(9) + " " + sites
-                    for cell_name, sites in observed_sites_3_state.items()
-                    if cell_name != "outgcell"
-                    and cell_name != "outgroot"
-                    and cell_name != "ingrroot"
-                ),
-            )
-        )
-
-    print("3state", end=" ")
-
-    with open(NEXUS_DIR + f"/3state_alt.nex", "w") as file:
-        file.write(
-            nexus_template.format(
-                NTAX=NCELLS_SAMPLE + 1,
-                NCHAR=NUM_SITES,
-                SYMBOLS='symbols="0 1 2"',
-                DATATYPE="standard",
-                SITES="\n".join(
-                    "    " + cell_name.ljust(9) + " " + sites
-                    for cell_name, sites in observed_sites_3_state_alt.items()
-                    if cell_name != "outgroot" and cell_name != "ingrroot"
-                ),
-            )
-        )
-
-    with open(NEXUS_DIR + f"/3state_alt-nooutgcell.nex", "w") as file:
-        file.write(
-            nexus_template.format(
-                NTAX=NCELLS_SAMPLE,
-                NCHAR=NUM_SITES,
-                SYMBOLS='symbols="0 1 2"',
-                DATATYPE="standard",
-                SITES="\n".join(
-                    "    " + cell_name.ljust(9) + " " + sites
-                    for cell_name, sites in observed_sites_3_state_alt.items()
-                    if cell_name != "outgcell"
-                    and cell_name != "outgroot"
-                    and cell_name != "ingrroot"
-                ),
-            )
-        )
-
-    print("3state_alt", end=" ")
-
-    with open(NEXUS_DIR + f"/2state.nex", "w") as file:
-        file.write(
-            nexus_template.format(
-                NTAX=NCELLS_SAMPLE + 1,
-                NCHAR=NUM_SITES,
-                SYMBOLS='symbols="0 1"',
-                DATATYPE="standard",
-                SITES="\n".join(
-                    "    " + cell_name.ljust(9) + " " + sites
-                    for cell_name, sites in observed_sites_2_state.items()
-                    if cell_name != "outgroot" and cell_name != "ingrroot"
-                ),
-            )
-        )
-
-    with open(NEXUS_DIR + f"/2state-nooutgcell.nex", "w") as file:
-        file.write(
-            nexus_template.format(
-                NTAX=NCELLS_SAMPLE,
-                NCHAR=NUM_SITES,
-                SYMBOLS='symbols="0 1"',
-                DATATYPE="standard",
-                SITES="\n".join(
-                    "    " + cell_name.ljust(9) + " " + sites
-                    for cell_name, sites in observed_sites_2_state.items()
-                    if cell_name != "outgcell"
-                    and cell_name != "outgroot"
-                    and cell_name != "ingrroot"
-                ),
-            )
-        )
-
-    print("2state")
