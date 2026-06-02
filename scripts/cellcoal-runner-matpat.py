@@ -124,14 +124,15 @@ OUTPUT_DIR = Path(opt.output_dir).resolve()
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def make_cellcoal_gtr(ss, pis):
-    # cellcoal wants zeros on the diagonal, even though this isn't the actual Q matrix.
+    # cellcoal wants zeros on the diagonal and doesn't include the pis,
+    # even though this isn't the actual Q matrix.
     return np.array(
         [
             # fmt: off
-            [           0.0, ss[0] * pis[1], ss[1] * pis[2], ss[2] * pis[3]],
-            [ss[0] * pis[0],            0.0, ss[3] * pis[2], ss[4] * pis[3]],
-            [ss[1] * pis[0], ss[3] * pis[1],            0.0, ss[5] * pis[3]],
-            [ss[2] * pis[0], ss[4] * pis[1], ss[5] * pis[2],            0.0],
+            [  0.0, ss[0], ss[1], ss[2]],
+            [ss[0],   0.0, ss[3], ss[4]],
+            [ss[1], ss[3],   0.0, ss[5]],
+            [ss[2], ss[4], ss[5],   0.0],
             # fmt: on
         ],
         dtype=np.float64,
