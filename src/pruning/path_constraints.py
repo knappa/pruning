@@ -6,7 +6,7 @@ import numpy as np
 def complete_paths_forward(node, incoming_paths):
     # extend (forward) all paths in incoming_paths that start "somewhere" and end at node
     extended_paths = [partial_path + [node.name] for partial_path in incoming_paths]
-    if node.is_leaf():
+    if node.is_leaf:
         return extended_paths
     else:
         left_child, right_child = node.children
@@ -18,7 +18,7 @@ def complete_paths_forward(node, incoming_paths):
 def complete_paths_backward(node, incoming_paths):
     # extend (backward) all paths that in incoming_paths that start at node
     extended_paths = [[node.name] + partial_path for partial_path in incoming_paths]
-    if node.is_leaf():
+    if node.is_leaf:
         return extended_paths
     else:
         left_child, right_child = node.children
@@ -29,7 +29,7 @@ def complete_paths_backward(node, incoming_paths):
 
 def get_paths(node, is_root=True) -> List[List[str]]:
     # get all paths that go through node (as it's maximal tree node)
-    if node.is_leaf():
+    if node.is_leaf:
         return []
 
     left_child, right_child = node.children

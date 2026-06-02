@@ -259,6 +259,7 @@ def main_cli():
         sequences_4state,
     ) = read_sequences(ambig_char, opt.seqs, log=opt.log)
 
+    freq_params = np.ones(4) / 4  # uniform frequencies as placeholder; will be replaced below.
     if freq_params_option not in {"FIX4", "FIX10", "FIX16"}:
         # if we are deriving this from sequence data, this is the correct value;
         # if we are optimizing, this is a good initial seed value
@@ -279,7 +280,7 @@ def main_cli():
             case _:
                 raise NotImplementedError(f"Missing the model? {model}")
 
-    assert set(true_tree.get_leaf_names()) == set(
+    assert set(true_tree.leaf_names()) == set(
         sequences_16state.keys()
     ), "not the same leaves! are these matching datasets?"
 

@@ -108,14 +108,14 @@ def compute_score_function_helper(
         patterns[:, right_leaf_idcs], axis=0, return_inverse=True
     )
 
-    if left_node.is_leaf():
+    if left_node.is_leaf:
         w_l_function = compute_leaf_vec(left_patterns, num_states)
     else:
         w_l_function = compute_score_function_helper(
             left_node, left_patterns, left_taxa_rel_indices, num_states, node_indices
         )
 
-    if right_node.is_leaf():
+    if right_node.is_leaf:
         w_r_function = compute_leaf_vec(right_patterns, num_states)
     else:
         w_r_function = compute_score_function_helper(

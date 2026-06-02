@@ -40,7 +40,7 @@ def rate_param_objective_prototype(
         # fix the overall rate, if not normalizing on the GT rate
         loss += constraint_weight * (rate_constraint_val - ploidy) ** 2
 
-        rate_params_corrected = rate_params * ploidy / rate_constraint_val
+        rate_params_corrected = rate_params * ploidy / max(1e-10, rate_constraint_val)
         loss += neg_log_likelihood(log_freq_params, rate_params_corrected, branch_lengths)
 
     return loss

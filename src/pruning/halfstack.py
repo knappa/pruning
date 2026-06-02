@@ -120,7 +120,7 @@ def main_cli():
         sequences_4state,
     ) = read_sequences(ambig_char, opt.seqs)
 
-    assert set(true_tree.get_leaf_names()) == set(
+    assert set(true_tree.leaf_names()) == set(
         sequences_16state.keys()
     ), "not the same leaves! are these matching datasets?"
 
