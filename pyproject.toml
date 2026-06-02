@@ -11,7 +11,7 @@ authors = [
 ]
 description = "A small example package"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
@@ -22,7 +22,7 @@ dependencies = [
     "scipy",
     "matplotlib",
     "numba",
-    "ete3",
+    "ete4",
 ]
 
 [project.scripts]
@@ -34,3 +34,6 @@ pruning_halfstack = "pruning.halfstack:main_cli"
 [project.urls]
 Homepage = "https://github.com/knappa/pruning"
 Issues = "https://github.com/knappa/pruning"
+
+[tool.black]
+target-version = ["py312"]

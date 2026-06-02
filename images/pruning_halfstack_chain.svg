@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="210" viewBox="0 0 520 210">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+  </defs>
+
+  <!-- F81 init -> UNPHASED_DNA (elbow up) -->
+  <path d="M 100,108 L 120,108 L 120,60 L 140,60" stroke="#666" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+  <!-- F81 init -> CELLPHY (elbow down) -->
+  <path d="M 100,122 L 120,122 L 120,170 L 140,170" stroke="#666" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+  <!-- UNPHASED_DNA -> GTR10Z (top) -->
+  <line x1="262" y1="60" x2="310" y2="60" stroke="#666" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- GTR10Z -> GTR10 (top) -->
+  <line x1="387" y1="60" x2="435" y2="60" stroke="#666" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- CELLPHY -> GTR10Z (bottom) -->
+  <line x1="222" y1="170" x2="310" y2="170" stroke="#666" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- GTR10Z -> GTR10 (bottom) -->
+  <line x1="387" y1="170" x2="435" y2="170" stroke="#666" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- F81 init -->
+  <rect x="20" y="101" width="80" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="60" y="115" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">F81 init</text>
+
+  <!-- UNPHASED_DNA -->
+  <rect x="140" y="46" width="122" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="201" y="60" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">UNPHASED_DNA</text>
+
+  <!-- GTR10Z (top) -->
+  <rect x="310" y="46" width="77" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="348" y="60" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">GTR10Z</text>
+
+  <!-- GTR10 (top) -->
+  <rect x="435" y="46" width="65" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="467" y="60" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">GTR10</text>
+
+  <!-- CELLPHY -->
+  <rect x="140" y="156" width="82" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="181" y="170" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">CELLPHY</text>
+
+  <!-- GTR10Z (bottom) -->
+  <rect x="310" y="156" width="77" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="348" y="170" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">GTR10Z</text>
+
+  <!-- GTR10 (bottom) -->
+  <rect x="435" y="156" width="65" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="467" y="170" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">GTR10</text>
+</svg>

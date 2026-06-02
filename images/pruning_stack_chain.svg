@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="630" height="240" viewBox="0 0 630 240">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+  </defs>
+
+  <!-- F81 init -> GTR4 -->
+  <line x1="90" y1="130" x2="118" y2="130" stroke="#666" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- GTR4 -> UNPHASED_DNA (elbow up) -->
+  <path d="M 200,124 L 224,124 L 224,60 L 248,60" stroke="#666" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+  <!-- GTR4 -> CELLPHY (horizontal) -->
+  <line x1="200" y1="130" x2="266" y2="130" stroke="#666" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- GTR4 -> PHASED_DNA16 (elbow down) -->
+  <path d="M 200,136 L 224,136 L 224,200 L 253,200" stroke="#666" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+  <!-- UNPHASED_DNA -> GTR10Z -->
+  <line x1="370" y1="60" x2="418" y2="60" stroke="#666" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- GTR10Z -> GTR10 -->
+  <line x1="497" y1="60" x2="545" y2="60" stroke="#666" stroke-width="1.5" marker-end="url(#arr)"/>
+  <!-- PHASED_DNA16 -> PHASED_DNA16_MP -->
+  <line x1="365" y1="200" x2="416" y2="200" stroke="#666" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- F81 init -->
+  <rect x="10" y="116" width="80" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="50" y="130" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">F81 init</text>
+
+  <!-- GTR4 -->
+  <rect x="120" y="116" width="80" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="160" y="130" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">GTR4</text>
+
+  <!-- UNPHASED_DNA -->
+  <rect x="248" y="46" width="122" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="309" y="60" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">UNPHASED_DNA</text>
+
+  <!-- GTR10Z -->
+  <rect x="420" y="46" width="77" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="458" y="60" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">GTR10Z</text>
+
+  <!-- GTR10 -->
+  <rect x="545" y="46" width="65" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="577" y="60" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">GTR10</text>
+
+  <!-- CELLPHY -->
+  <rect x="268" y="116" width="82" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="309" y="130" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">CELLPHY</text>
+
+  <!-- PHASED_DNA16 -->
+  <rect x="253" y="186" width="112" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="309" y="200" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">PHASED_DNA16</text>
+
+  <!-- PHASED_DNA16_MP -->
+  <rect x="418" y="186" width="150" height="28" rx="4" fill="#e8f0fe" stroke="#666" stroke-width="1.5"/>
+  <text x="493" y="200" font-family="monospace" font-size="13" text-anchor="middle" dy="0.35em" fill="#222">PHASED_DNA16_MP</text>
+</svg>

@@ -1,0 +1,36 @@
+
+data/
+
+# virtual environment
+venv/
+
+# Python build artifacts
+__pycache__/
+*.egg-info/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+
+# R
+.lintr
+Rplots.pdf
+
+# local fork (not tracked)
+cellcoal-modified/
+
+# generated outputs
+out/
+cc.zip
+test*.pdf
+tree-0-ancestral.fasta
+tree-0-nexus-files/
+tree-stats-output-*.csv
+2024-11-12-Note-10-41_annotated.pdf
+scripts/*.pdf
+scripts/*.png
+scripts/run-10-models-nossh.sh
+scripts/runner.sh

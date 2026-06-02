@@ -12,9 +12,7 @@ library(phangorn)
 library(tidytree)
 
 #models <- c("4state", "phased16", "phased16mp", "unphased", "cellphy", "gtr10z", "gtr10")
-# models <- c("4state", "unphased", "cellphy", "gtr10z", "gtr10", "phased_dna16", "phased_dna16_4")
-models <- c("unphased", "cellphy", "gtr10z", "gtr10")
-
+models <- c("4state", "unphased", "cellphy", "gtr10z", "gtr10", "phased_dna16", "phased_dna16_4")
 
 df <- data.frame(matrix(
   ncol = 10,
@@ -37,7 +35,7 @@ for (model.idx in seq_along(models)) {
         models[model.idx],
         "-",
         str_pad(item - 1, 3, pad = "0"),
-        ".nwk",
+        "-before-lklyhd-opt.nwk",
         sep = ""
       )
     )
@@ -53,14 +51,6 @@ for (model.idx in seq_along(models)) {
     x <- as_tibble(true_tree)
     x['branch.length'] <- x['branch.length'] * 1.784008614285714
     true_tree <- as.phylo(x)
-
-    # #########################################
-    # # rescale branch lengths of phased_dna16_4 tree
-    # if (model.idx == 7) {
-    #   x <- as_tibble(tree)
-    #   x['branch.length'] <- x['branch.length'] * 0.5
-    #   tree <- as.phylo(x)
-    # }
 
     #########################################
     # distances
@@ -87,6 +77,6 @@ for (model.idx in seq_along(models)) {
 
 write.csv(df, paste(
   directory,
-  "/tree-stats-output.csv",
+  "/tree-stats-before-lklyhd-opt-output.csv",
   sep = ""
 ), row.names = FALSE)
