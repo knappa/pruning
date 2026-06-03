@@ -1,15 +1,20 @@
 from typing import Callable, Tuple
 
-import numba
 import numpy as np
-from scipy.special import logsumexp
 
-from pruning.util import kahan_dot, log_dot, log_matrix_mult
+from pruning.pruning_cpp import TreeScore
 
 
-def compute_leaf_vec(patterns, num_states) -> Callable:
-    # print(f"compute_leaf_vector({patterns=})")
-    # noinspection PyUnreachableCode
+def _make_log_leaf_vecs(patterns, num_states) -> np.ndarray:
+    """Compute log-space leaf likelihood vectors for deduplicated patterns.
+
+    patterns: 1D array of state indices (one per unique pattern at this leaf).
+    Returns: (n_unique, n_states) float64 array of log-probabilities.
+    """
+    patterns = np.asarray(patterns)
+    if patterns.ndim == 2:
+        assert patterns.shape[1] == 1
+        patterns = patterns[:, 0]
     match num_states:
         case 4:
             id4 = np.identity(4, dtype=np.float64)
@@ -57,24 +62,16 @@ def compute_leaf_vec(patterns, num_states) -> Callable:
             raise NotImplementedError(f"Num states = {num_states} not implemented")
 
     with np.errstate(divide="ignore"):
-        result = np.clip(
+        return np.clip(
             np.log(np.array([arr[p, :] for p in patterns], dtype=np.float64)), -1e100, 0.0
         )
 
-    # noinspection PyUnusedLocal
-    def local_score_function_terminal(prob_matrices: np.ndarray) -> np.ndarray:
-        return result
 
-    # return local_score_function_terminal
-    return numba.jit(local_score_function_terminal, nopython=True)
-
-
-def compute_score_function_helper(
-    node, patterns, taxa_indices_, num_states, node_indices
-) -> Callable:
-    # taxa_indices_ should a dict who's keys are taxon names (str) and values should be the
-    # corresponding index (int) in the patterns.
-    # print(f"compute_score_function_helper({node=},{patterns=},{taxa_indices_=})")
+def _build_tree_nodes(node, patterns, taxa_indices_, num_states, node_indices, out_nodes):
+    """
+    Recursively walk the tree, computing pattern deduplication and building
+    the flat node list (postorder). Returns the index of this node in out_nodes.
+    """
     assert len(node.children) == 2
     left_node, right_node = node.children
 
@@ -109,119 +106,108 @@ def compute_score_function_helper(
     )
 
     if left_node.is_leaf:
-        w_l_function = compute_leaf_vec(left_patterns, num_states)
+        left_id = len(out_nodes)
+        out_nodes.append({
+            "is_leaf": True,
+            "log_vecs": _make_log_leaf_vecs(left_patterns, num_states),
+        })
     else:
-        w_l_function = compute_score_function_helper(
-            left_node, left_patterns, left_taxa_rel_indices, num_states, node_indices
+        left_id = _build_tree_nodes(
+            left_node, left_patterns, left_taxa_rel_indices, num_states, node_indices, out_nodes
         )
 
     if right_node.is_leaf:
-        w_r_function = compute_leaf_vec(right_patterns, num_states)
+        right_id = len(out_nodes)
+        out_nodes.append({
+            "is_leaf": True,
+            "log_vecs": _make_log_leaf_vecs(right_patterns, num_states),
+        })
     else:
-        w_r_function = compute_score_function_helper(
-            right_node, right_patterns, right_taxa_rel_indices, num_states, node_indices
+        right_id = _build_tree_nodes(
+            right_node, right_patterns, right_taxa_rel_indices, num_states, node_indices, out_nodes
         )
 
-    left_index = node_indices[left_node.name]
-    right_index = node_indices[right_node.name]
-
-    def local_score_function_branching(prob_matrices: np.ndarray) -> np.ndarray:
-        w_l = w_l_function(prob_matrices)
-        w_r = w_r_function(prob_matrices)
-
-        with np.errstate(divide="ignore"):
-            p_l = np.clip(np.log(np.clip(prob_matrices[left_index, :, :], 0.0, 1.0)), -1e100, 0.0)
-            p_r = np.clip(np.log(np.clip(prob_matrices[right_index, :, :], 0.0, 1.0)), -1e100, 0.0)
-
-        v_n = np.clip(
-            log_matrix_mult(w_l[left_pattern_inverse], p_l)
-            + log_matrix_mult(w_r[right_pattern_inverse], p_r),
-            -1e100,
-            0.0,
-        )
-        return v_n
-
-    return local_score_function_branching
+    this_id = len(out_nodes)
+    out_nodes.append({
+        "is_leaf": False,
+        "left_child": left_id,
+        "right_child": right_id,
+        "left_branch_idx": node_indices[left_node.name],
+        "right_branch_idx": node_indices[right_node.name],
+        "left_pattern_inv": left_pattern_inverse.astype(np.int32),
+        "right_pattern_inv": right_pattern_inverse.astype(np.int32),
+    })
+    return this_id
 
 
-def compute_score_function(
+def build_cpp_scorer(
     *, root, patterns, pattern_counts, num_states, taxa_indices, node_indices
-) -> Callable:
-    """Compile a Felsenstein pruning score function (negative log-likelihood) for the given tree and site patterns."""
-    # print(f"compute_score_function({root=},{patterns=},{pattern_counts=})")
-    v_function = compute_score_function_helper(
-        root, patterns, taxa_indices, num_states, node_indices
+) -> TreeScore:
+    """Build a C++ TreeScore for Felsenstein pruning on the given tree and site patterns."""
+    out_nodes = []
+    root_id = _build_tree_nodes(root, patterns, taxa_indices, num_states, node_indices, out_nodes)
+    return TreeScore(
+        node_specs=out_nodes,
+        root_id=root_id,
+        root_pattern_counts=pattern_counts.astype(np.int32),
+        n_states=num_states,
     )
 
-    def score_function(log_freq_params, prob_matrices):
-        v = v_function(prob_matrices)
-        # can't assume that pis are normalized
-        log_freq_params_corrected = log_freq_params - logsumexp(log_freq_params)
-        return -kahan_dot(pattern_counts, log_dot(v, log_freq_params_corrected))
 
-    return numba.jit(score_function, nopython=False, forceobj=True)
-    # return score_function
-
-
-def compute_factored_score_function(
+def build_cpp_factored_scorer(
     *, root, patterns, pattern_counts, num_states, taxa_indices, node_indices
-) -> Tuple[Callable, Callable]:
-    """Compile separate maternal and paternal Felsenstein pruning score functions by splitting 16-state patterns into independent 4-state patterns."""
-    # separate maternal and paternal patterns
+) -> Tuple[TreeScore, TreeScore]:
+    """Build maternal and paternal TreeScores by splitting 16-state patterns into 4-state pairs."""
     maternal_patterns, paternal_patterns = np.divmod(patterns, 5)
 
-    # deduplicate maternal patterns, combining counts
     reduced_maternal_patterns, maternal_pattern_indices = np.unique(
         maternal_patterns, axis=0, return_inverse=True
     )
-    maternal_pattern_counts = np.zeros(shape=reduced_maternal_patterns.shape[0], dtype=np.int64)
+    maternal_pattern_counts = np.zeros(reduced_maternal_patterns.shape[0], dtype=np.int64)
     for orig_idx, dedup_idx in enumerate(maternal_pattern_indices):
         maternal_pattern_counts[dedup_idx] += pattern_counts[orig_idx]
 
-    # create maternal score function
-    maternal_v_function = compute_score_function_helper(
-        root, maternal_patterns, taxa_indices, num_states, node_indices
-    )
-
-    def maternal_score_function(log_freq_params, prob_matrices):
-        v = maternal_v_function(prob_matrices)
-        # can't assume that pis are normalized
-        log_freq_params_corrected = log_freq_params - logsumexp(log_freq_params)
-        return -kahan_dot(maternal_pattern_counts, log_dot(v, log_freq_params_corrected))
-
-    # deduplicate paternal patterns, combining counts
     reduced_paternal_patterns, paternal_pattern_indices = np.unique(
         paternal_patterns, axis=0, return_inverse=True
     )
-    paternal_pattern_counts = np.zeros(shape=reduced_paternal_patterns.shape[0], dtype=np.int64)
+    paternal_pattern_counts = np.zeros(reduced_paternal_patterns.shape[0], dtype=np.int64)
     for orig_idx, dedup_idx in enumerate(paternal_pattern_indices):
         paternal_pattern_counts[dedup_idx] += pattern_counts[orig_idx]
 
-    # create paternal score function
-    paternal_v_function = compute_score_function_helper(
-        root, paternal_patterns, taxa_indices, num_states, node_indices
+    mat_nodes = []
+    mat_root_id = _build_tree_nodes(
+        root, maternal_patterns, taxa_indices, num_states, node_indices, mat_nodes
+    )
+    mat_scorer = TreeScore(
+        node_specs=mat_nodes,
+        root_id=mat_root_id,
+        root_pattern_counts=maternal_pattern_counts.astype(np.int32),
+        n_states=num_states,
     )
 
-    def paternal_score_function(log_freq_params, prob_matrices):
-        v = paternal_v_function(prob_matrices)
-        # can't assume that pis are normalized
-        log_freq_params_corrected = log_freq_params - logsumexp(log_freq_params)
-        return -kahan_dot(paternal_pattern_counts, log_dot(v, log_freq_params_corrected))
-
-    return numba.jit(maternal_score_function, nopython=False, forceobj=True), numba.jit(
-        paternal_score_function, nopython=False, forceobj=True
+    pat_nodes = []
+    pat_root_id = _build_tree_nodes(
+        root, paternal_patterns, taxa_indices, num_states, node_indices, pat_nodes
     )
+    pat_scorer = TreeScore(
+        node_specs=pat_nodes,
+        root_id=pat_root_id,
+        root_pattern_counts=paternal_pattern_counts.astype(np.int32),
+        n_states=num_states,
+    )
+
+    return mat_scorer, pat_scorer
 
 
 def neg_log_likelihood_prototype(
     log_freq_params,
     model_params,
-    tree_distances,
+    branch_lengths,
     *,
-    prob_model_maker,
-    score_function,
+    eigen_maker: Callable,
+    scorer: TreeScore,
 ):
-    """Compute negative log-likelihood by constructing probability matrices from the model and evaluating the score function."""
-    prob_model = prob_model_maker(np.exp(log_freq_params), model_params, vec=True)
-    prob_matrices = prob_model(tree_distances)
-    return score_function(log_freq_params, prob_matrices)
+    """Compute negative log-likelihood via eigendecomposition + C++ TreeScore."""
+    pis = np.exp(log_freq_params)
+    left, right, evals = eigen_maker(pis, model_params)
+    return scorer(log_freq_params, left, right, evals, branch_lengths)

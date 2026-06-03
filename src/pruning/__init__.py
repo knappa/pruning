@@ -16,13 +16,13 @@ def main_cli():
         gtr4_rate,
         gtr10_rate,
         gtr10z_rate,
-        make_cellphy_prob_model,
-        make_gtr10_prob_model,
-        make_gtr10z_prob_model,
-        make_GTR_prob_model,
-        make_GTRsq_prob_model,
-        make_GTRxGTR_prob_model,
-        make_unphased_GTRsq_prob_model,
+        make_cellphy_eigen,
+        make_gtr10_eigen,
+        make_gtr10z_eigen,
+        make_GTR_eigen,
+        make_GTRsq_eigen,
+        make_GTRxGTR_eigen,
+        make_unphased_GTRsq_eigen,
         phased_mp_rate,
         phased_rate,
         unphased_freq_param_cleanup,
@@ -31,8 +31,8 @@ def main_cli():
     from pruning.output import save_as_newick
     from pruning.read_sequences import read_sequences
     from pruning.score_function_gen import (
-        compute_factored_score_function,
-        compute_score_function,
+        build_cpp_factored_scorer,
+        build_cpp_scorer,
         neg_log_likelihood_prototype,
     )
     from pruning.util import rate_param_cleanup, rate_param_scale
@@ -348,7 +348,7 @@ def main_cli():
             rate_constraint = gtr4_rate
             if freq_params is None:
                 freq_params = pi4s_from_seq
-            prob_model_maker = make_GTR_prob_model
+            eigen_maker = make_GTR_eigen
 
         case "PHASED_DNA16":
             num_states = 16
@@ -356,7 +356,7 @@ def main_cli():
             rate_constraint = phased_rate
             if freq_params is None:
                 freq_params = pi16s_from_seq
-            prob_model_maker = make_GTRsq_prob_model
+            eigen_maker = make_GTRsq_eigen
 
         case "PHASED_DNA16_MP":
             num_states = 16
@@ -364,7 +364,7 @@ def main_cli():
             rate_constraint = phased_mp_rate
             if freq_params is None:
                 freq_params = pi16s_from_seq
-            prob_model_maker = make_GTRxGTR_prob_model
+            eigen_maker = make_GTRxGTR_eigen
 
         case "UNPHASED_DNA":
             num_states = 10
@@ -372,7 +372,7 @@ def main_cli():
             rate_constraint = unphased_rate
             if freq_params is None:
                 freq_params = unphased_freq_param_cleanup(pi10s_from_seq)
-            prob_model_maker = make_unphased_GTRsq_prob_model
+            eigen_maker = make_unphased_GTRsq_eigen
 
         case "CELLPHY":
             num_states = 10
@@ -380,7 +380,7 @@ def main_cli():
             rate_constraint = cellphy10_rate
             if freq_params is None:
                 freq_params = pi10s_from_seq
-            prob_model_maker = make_cellphy_prob_model
+            eigen_maker = make_cellphy_eigen
 
         case "GTR10Z":
             num_states = 10
@@ -388,7 +388,7 @@ def main_cli():
             rate_constraint = gtr10z_rate
             if freq_params is None:
                 freq_params = pi10s_from_seq
-            prob_model_maker = make_gtr10z_prob_model
+            eigen_maker = make_gtr10z_eigen
 
         case "GTR10":
             num_states = 10
@@ -396,7 +396,7 @@ def main_cli():
             rate_constraint = gtr10_rate
             if freq_params is None:
                 freq_params = pi10s_from_seq
-            prob_model_maker = make_gtr10_prob_model
+            eigen_maker = make_gtr10_eigen
 
         case _:
             assert False, "Unknown model type"
@@ -458,12 +458,15 @@ def main_cli():
     # jointly optimize GTR params and branch lens using neg-log likelihood
     ##########################################################################################
 
+    patterns_arr = np.array([pattern for pattern in counts.keys()])
+    counts_arr = np.array([count for count in counts.values()])
+
     if model == "PHASED_DNA16_4":
-        # use the factored score function
-        mat_score, pat_score = compute_factored_score_function(
+        # use the factored scorer (splits 16-state patterns into 4-state maternal/paternal)
+        mat_scorer, pat_scorer = build_cpp_factored_scorer(
             root=true_tree,
-            patterns=np.array([pattern for pattern in counts.keys()]),
-            pattern_counts=np.array([count for count in counts.values()]),
+            patterns=patterns_arr,
+            pattern_counts=counts_arr,
             num_states=num_states,
             taxa_indices=taxa_indices,
             node_indices=node_indices,
@@ -471,26 +474,22 @@ def main_cli():
 
         mat_neg_log_likelihood = functools.partial(
             neg_log_likelihood_prototype,
-            prob_model_maker=prob_model_maker,
-            score_function=mat_score,
+            eigen_maker=eigen_maker,
+            scorer=mat_scorer,
         )
 
         pat_neg_log_likelihood = functools.partial(
             neg_log_likelihood_prototype,
-            prob_model_maker=prob_model_maker,
-            score_function=pat_score,
+            eigen_maker=eigen_maker,
+            scorer=pat_scorer,
         )
 
-        def joint_score(log_freq_params, prob_matrices):
-            return mat_score(log_freq_params, prob_matrices) + pat_score(
-                log_freq_params, prob_matrices
+        def joint_neg_log_likelihood(log_freq_params, model_params, branch_lengths):
+            pis = np.exp(log_freq_params)
+            left, right, evals = eigen_maker(pis, model_params)
+            return mat_scorer(log_freq_params, left, right, evals, branch_lengths) + pat_scorer(
+                log_freq_params, left, right, evals, branch_lengths
             )
-
-        joint_neg_log_likelihood = functools.partial(
-            neg_log_likelihood_prototype,
-            prob_model_maker=prob_model_maker,
-            score_function=joint_score,
-        )
 
         rate_params, branch_lengths, nll = fit_factored_model(
             mat_neg_log_likelihood=mat_neg_log_likelihood,
@@ -508,11 +507,11 @@ def main_cli():
     else:
         neg_log_likelihood = functools.partial(
             neg_log_likelihood_prototype,
-            prob_model_maker=prob_model_maker,
-            score_function=compute_score_function(
+            eigen_maker=eigen_maker,
+            scorer=build_cpp_scorer(
                 root=true_tree,
-                patterns=np.array([pattern for pattern in counts.keys()]),
-                pattern_counts=np.array([count for count in counts.values()]),
+                patterns=patterns_arr,
+                pattern_counts=counts_arr,
                 num_states=num_states,
                 taxa_indices=taxa_indices,
                 node_indices=node_indices,
@@ -530,6 +529,7 @@ def main_cli():
             fix_rate_params=use_fixed_rate_params,
         )
 
+    has_output = hasattr(opt, "output") and opt.output is not None
     save_as_newick(
         branch_lengths=branch_lengths,
         scale=(
@@ -542,10 +542,13 @@ def main_cli():
             if final_rp_norm
             else 1
         ),
-        output=opt.output + ".nwk",
+        output=opt.output + ".nwk" if has_output else "",
         true_tree=true_tree,
-        to_stdout=(not hasattr(opt, "output")) or opt.output is None,
+        to_stdout=not has_output,
     )
+
+    if not has_output:
+        return
 
     with open(opt.output + ".csv", "w") as file:
         file.write("nll")

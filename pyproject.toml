@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.9", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
 
 
 [project]
@@ -21,7 +21,6 @@ dependencies = [
     "numpy",
     "scipy",
     "matplotlib",
-    "numba",
     "ete4",
 ]
 
@@ -35,5 +34,10 @@ pruning_halfstack = "pruning.halfstack:main_cli"
 Homepage = "https://github.com/knappa/pruning"
 Issues = "https://github.com/knappa/pruning"
 
+[tool.scikit-build]
+cmake.build-type = "Release"
+wheel.packages = ["src/pruning"]
+
 [tool.black]
 target-version = ["py312"]
+line-length = 100
