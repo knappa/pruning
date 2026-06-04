@@ -92,8 +92,6 @@ The pruning utility has a number of options.
   * `--optimize_freq_params` Initial frequency parameters are derived from the sequence, but then treated as an optimizable parameter.
   * `--fix_freq_params[4,10,16]` Frequency parameters are fixed as input.
 
+## Included scripts and derivations
 
-command line options for each and their purpose
-
-## Included scripts
-
+See the scripts [README](scripts/README.md) for deatils on the included scripts. Derivations for some formulae are found as [Sage](https://www.sagemath.org) notebooks in the `math` directory.
