@@ -1,4 +1,3 @@
-import numba
 import numpy as np
 import scipy
 from numpy.linalg import LinAlgError
@@ -1589,9 +1588,7 @@ def make_cellphy_prob_model(pis, model_params, *, vec=False):
 ####################################################################################################
 
 
-@numba.jit(nopython=True)
 def prob_model_helper(t, left, right, evals):
-    # return np.clip(((left * np.exp(t * evals)) @ right).astype(np.float64), 0.0, 1.0)
     return ((left * np.exp(t * evals)) @ right).astype(np.float64)
 
 
@@ -1599,6 +1596,14 @@ def prob_model_helper_vec(
     t: np.ndarray, left: np.ndarray, right: np.ndarray, evals: np.ndarray
 ) -> np.ndarray:
     return ((np.exp(t[:, None] * evals)[:, None, :] * left[None, :, :]) @ right).astype(np.float64)
+
+
+def _eigen_decomp(sym_Q, pis):
+    """Shared eigendecomposition used by all eigen_maker functions."""
+    evals, sym_evecs = np.linalg.eigh(sym_Q)
+    left = sym_evecs / np.sqrt(pis)[:, None]
+    right = sym_evecs.T * np.sqrt(pis)
+    return left, right, evals
 
 
 def Qsym_gtr4(pis, model_params):
@@ -1908,3 +1913,36 @@ def gtr10z_to_gtr10(s):
             s[23],  # CT -> GT
         ]
     )
+
+
+####################################################################################################
+# eigen_maker functions: expose (left, right, evals) for each model's rate matrix.
+# Used by neg_log_likelihood_prototype to feed the C++ TreeScore.
+
+
+def make_GTR_eigen(pis, model_params):
+    return _eigen_decomp(Qsym_gtr4(pis, model_params), pis)
+
+
+def make_GTRxGTR_eigen(pis, model_params):
+    return _eigen_decomp(Qsym_GTRxGTR(pis, model_params), pis)
+
+
+def make_GTRsq_eigen(pis, model_params):
+    return _eigen_decomp(Qsym_GTRsq(pis, model_params), pis)
+
+
+def make_gtr10_eigen(pis, model_params):
+    return _eigen_decomp(Qsym_gtr10(pis, model_params), pis)
+
+
+def make_gtr10z_eigen(pis, model_params):
+    return _eigen_decomp(Qsym_gtr10z(pis, model_params), pis)
+
+
+def make_cellphy_eigen(pis, model_params):
+    return _eigen_decomp(Qsym_cellphy10(pis, model_params), pis)
+
+
+def make_unphased_GTRsq_eigen(pis, model_params):
+    return _eigen_decomp(Qsym_unphased(pis, model_params), pis)

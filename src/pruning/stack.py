@@ -17,13 +17,13 @@ def main_cli():
         gtr10_rate,
         gtr10z_rate,
         gtr10z_to_gtr10,
-        make_cellphy_prob_model,
-        make_gtr10_prob_model,
-        make_gtr10z_prob_model,
-        make_GTR_prob_model,
-        make_GTRsq_prob_model,
-        make_GTRxGTR_prob_model,
-        make_unphased_GTRsq_prob_model,
+        make_cellphy_eigen,
+        make_gtr10_eigen,
+        make_gtr10z_eigen,
+        make_GTR_eigen,
+        make_GTRsq_eigen,
+        make_GTRxGTR_eigen,
+        make_unphased_GTRsq_eigen,
         phased_mp_rate,
         phased_rate,
         unphased_freq_param_cleanup,
@@ -32,7 +32,7 @@ def main_cli():
     )
     from pruning.output import print_states, save_as_newick
     from pruning.read_sequences import read_sequences
-    from pruning.score_function_gen import compute_score_function, neg_log_likelihood_prototype
+    from pruning.score_function_gen import build_cpp_scorer, neg_log_likelihood_prototype
     from pruning.util import rate_param_cleanup, rate_param_scale
 
     parser = argparse.ArgumentParser(
@@ -210,8 +210,8 @@ def main_cli():
 
     neg_log_likelihood_4state = functools.partial(
         neg_log_likelihood_prototype,
-        prob_model_maker=make_GTR_prob_model,
-        score_function=compute_score_function(
+        eigen_maker=make_GTR_eigen,
+        scorer=build_cpp_scorer(
             root=true_tree,
             patterns=np.array([pattern for pattern in counts_4state.keys()]),
             pattern_counts=np.array([count for count in counts_4state.values()]),
@@ -268,8 +268,8 @@ def main_cli():
 
     neg_log_likelihood_unphased = functools.partial(
         neg_log_likelihood_prototype,
-        prob_model_maker=make_unphased_GTRsq_prob_model,
-        score_function=compute_score_function(
+        eigen_maker=make_unphased_GTRsq_eigen,
+        scorer=build_cpp_scorer(
             root=true_tree,
             patterns=np.array([pattern for pattern in counts_10state.keys()]),
             pattern_counts=np.array([count for count in counts_10state.values()]),
@@ -326,8 +326,8 @@ def main_cli():
 
     neg_log_likelihood_cellphy = functools.partial(
         neg_log_likelihood_prototype,
-        prob_model_maker=make_cellphy_prob_model,
-        score_function=compute_score_function(
+        eigen_maker=make_cellphy_eigen,
+        scorer=build_cpp_scorer(
             root=true_tree,
             patterns=np.array([pattern for pattern in counts_10state.keys()]),
             pattern_counts=np.array([count for count in counts_10state.values()]),
@@ -385,8 +385,8 @@ def main_cli():
 
     neg_log_likelihood_gtr10z = functools.partial(
         neg_log_likelihood_prototype,
-        prob_model_maker=make_gtr10z_prob_model,
-        score_function=compute_score_function(
+        eigen_maker=make_gtr10z_eigen,
+        scorer=build_cpp_scorer(
             root=true_tree,
             patterns=np.array([pattern for pattern in counts_10state.keys()]),
             pattern_counts=np.array([count for count in counts_10state.values()]),
@@ -444,8 +444,8 @@ def main_cli():
 
     neg_log_likelihood_gtr10 = functools.partial(
         neg_log_likelihood_prototype,
-        prob_model_maker=make_gtr10_prob_model,
-        score_function=compute_score_function(
+        eigen_maker=make_gtr10_eigen,
+        scorer=build_cpp_scorer(
             root=true_tree,
             patterns=np.array([pattern for pattern in counts_10state.keys()]),
             pattern_counts=np.array([count for count in counts_10state.values()]),
@@ -503,8 +503,8 @@ def main_cli():
 
     neg_log_likelihood_16state = functools.partial(
         neg_log_likelihood_prototype,
-        prob_model_maker=make_GTRsq_prob_model,
-        score_function=compute_score_function(
+        eigen_maker=make_GTRsq_eigen,
+        scorer=build_cpp_scorer(
             root=true_tree,
             patterns=np.array([pattern for pattern in counts_16state.keys()]),
             pattern_counts=np.array([count for count in counts_16state.values()]),
@@ -562,8 +562,8 @@ def main_cli():
 
     neg_log_likelihood_16state_mp = functools.partial(
         neg_log_likelihood_prototype,
-        prob_model_maker=make_GTRxGTR_prob_model,
-        score_function=compute_score_function(
+        eigen_maker=make_GTRxGTR_eigen,
+        scorer=build_cpp_scorer(
             root=true_tree,
             patterns=np.array([pattern for pattern in counts_16state.keys()]),
             pattern_counts=np.array([count for count in counts_16state.values()]),

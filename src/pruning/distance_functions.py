@@ -1,22 +1,13 @@
 from typing import Callable, Optional, Tuple, Union
 
-import numba
 import numpy as np
 
 ####################################################################################################
 
 
-@numba.njit
 def haploid_dna_disagreement(seq1: np.ndarray, seq2: np.ndarray) -> float:
-    disagreement = 0.0
-    assert seq1.shape == seq2.shape
-    for idx in range(len(seq1)):
-        if seq1[idx] < 4 and seq2[idx] < 4:
-            if seq1[idx] != seq2[idx]:
-                disagreement += 1.0
-        else:
-            disagreement += 0.75
-    return disagreement / len(seq1)
+    both_known = (seq1 < 4) & (seq2 < 4)
+    return (np.sum(both_known & (seq1 != seq2)) + 0.75 * np.sum(~both_known)) / len(seq1)
 
 
 def haploid_dna_sequence_distance(
@@ -47,15 +38,8 @@ def haploid_dna_sequence_distance(
 ####################################################################################################
 
 
-@numba.njit
 def sequence_disagreement(seq1: np.ndarray, seq2: np.ndarray) -> float:
-    disagreement = 0.0
-    assert seq1.shape == seq2.shape
-    for nuc_pair_a, nuc_pair_b in zip(seq1, seq2):
-        if nuc_pair_a != nuc_pair_b:
-            disagreement += 1.0
-
-    return disagreement / len(seq1)
+    return float(np.sum(seq1 != seq2)) / len(seq1)
 
 
 def sequence_distance(
