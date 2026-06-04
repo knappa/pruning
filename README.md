@@ -67,12 +67,12 @@ The pruning utility has a number of options.
 * `--tree` the true tree in Newick format (branch lengths are not required and are ignored for optimization purposes)
 * `--model` choice of model for to optimize. There are several options
   * `DNA` a GTR4 model
-  * `PHASED_DNA16` a GTR4$^{\oplus 2}$ model. i.e. a model on phased DNA (16 state) in which the maternal and paternal strands evolve independently according to the same GTR4 model.
-  * `PHASED_DNA16_MP` a GTR4$\oplus$GTR4 model. i.e. a model on phased DNA (16 state) in which the maternal and paternal strands evolve independently according to (possibly distinct) GTR4 models.
+  * `PHASED_DNA16` a GTR4<sup>&oplus;2</sup> model. i.e. a model on phased DNA (16 state) in which the maternal and paternal strands evolve independently according to the same GTR4 model.
+  * `PHASED_DNA16_MP` a GTR4&oplus;GTR4 model. i.e. a model on phased DNA (16 state) in which the maternal and paternal strands evolve independently according to (possibly distinct) GTR4 models.
   * `UNPHASED_DNA` a model of unphased maternal/paternal DNA (10 state) obtained by lumping phased maternal/paternal pairs to unphased pairs. e.g. A|C and C|A are identified with the unphased pair A/C   
   * `CELLPHY` another model on unphased DNA (10 state) as described in Kozlov et al. (2022) *CellPhy: accurate and fast probabilistic inference of single-cell phylogenies from scDNA-seq data*, Genome Biology 23:37. https://doi.org/10.1186/s13059-021-02583-w
   * `GTR10` the general time reversible model on 10 states, applied to unphased DNA. State order: AA, CC, GG, TT, AC, AG, AT, CG, CT, GT.
-  * `GTR10Z` a submodel of `GTR10` in which the rates of all double-transitions (e.g. the rates of AA$\to$CC or CT$\to$AG) are fixed at zero. Note that both the `UNPHASED_DNA` and `CELLPHY` models are submodels of `GTR10Z`.
+  * `GTR10Z` a submodel of `GTR10` in which the rates of all double-transitions (e.g. the rates of AA&rarr;CC or CT&rarr;AG) are fixed at zero. Note that both the `UNPHASED_DNA` and `CELLPHY` models are submodels of `GTR10Z`.
 
 **Data requirements** 
 * The taxon names for leaves in the phylip and newick files must match. 
@@ -85,8 +85,8 @@ The pruning utility has a number of options.
 * `--overwrite` if present, pruning will overwrite existing output files. otherwise, if the output files already exist, pruning will exit
 * `--log` if present, print various diagnostic and intermediate convergence results during optimization
 * Rate normalization options; these also affect the reported branch lengths. It only makes sense to use one or zero of these options.
-  * `--ploidy` normalize $\mu$ for haploid (1) or diploid (2) , default is to infer ploidy from the chosen model.
-  * `--final_rp_norm` instead of normalizing using $\mu$, normalize rate parameters so that the final one is fixed at 1. (In the DNA model this corresponds to the G$\to$T rate and is different in each model.)
+  * `--ploidy` normalize &mu; for haploid (1) or diploid (2) , default is to infer ploidy from the chosen model.
+  * `--final_rp_norm` instead of normalizing using &mu;, normalize rate parameters so that the final one is fixed at 1. (In the DNA model this corresponds to the G&rarr;T rate and is different in each model.)
 * Rate parameter options. These are mutually exclusive.
   * `--freq_params_from_seq` Default. Frequency parameters are derived directly from the sequence.
   * `--optimize_freq_params` Initial frequency parameters are derived from the sequence, but then treated as an optimizable parameter.
