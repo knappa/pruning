@@ -2,6 +2,7 @@
 # coding: utf-8
 import argparse
 import math
+import re
 import shutil
 import subprocess
 import sys
@@ -11,13 +12,23 @@ import ete4
 import numpy as np
 
 parser = argparse.ArgumentParser(
-    description="Generate trees with parallel maternal and paternal sequences"
+    description="Re-run cellcoal on existing trees with new settings"
 )
 
 parser.add_argument("--ncells", type=int, required=True, help="number of cells in sample")
-parser.add_argument("--nsamples", type=int, required=True, help="number of samples")
+parser.add_argument(
+    "--nsamples",
+    type=int,
+    required=False,
+    help="number of samples (default: derived from input_dir)",
+)
 parser.add_argument("--nsites", type=int, required=True, help="number of sites")
-parser.add_argument("--eff_pop", type=int, required=True, help="effective population size")
+parser.add_argument(
+    "--input_dir",
+    type=str,
+    required=True,
+    help="directory containing existing tree run (output of cellcoal-runner-matpat.py)",
+)
 parser.add_argument("--exp_growth_rate", type=float, required=False, help="exponential growth rate")
 parser.add_argument(
     "--birth_rate", type=float, required=False, help="birth rate (Ohtsaki Innan 2017)"
@@ -100,7 +111,9 @@ parser.add_argument(
 parser.add_argument("--log", action="store_true")
 
 if hasattr(sys, "ps1"):
-    opt = parser.parse_args("--ncells 10 " "--nsamples 10 " "--nsites 1000 " "--log".split())
+    opt = parser.parse_args(
+        "--ncells 10 --nsamples 10 --nsites 1000 --input_dir . --log".split()
+    )
 else:
     opt = parser.parse_args()
 
@@ -109,7 +122,6 @@ if opt.log:
     print(opt)
 
 NCELLS_SAMPLE = opt.ncells
-NUM_SAMPLES = opt.nsamples
 NUM_SITES = opt.nsites
 ALLELIC_DROPOUT = opt.ado
 AMPLIFICATION_ERROR_MEAN = opt.amp_err_mean
@@ -118,7 +130,8 @@ SEQUENCING_ERROR = opt.seq_err
 RATE_VAR_SITES_GAMMA_PARAM = opt.gamma if opt.gamma is not None else float("-inf")
 NUC_BASE_FREQ = opt.base_freqs
 
-OUTPUT_DIR = Path(opt.output_dir).resolve()
+INPUT_DIR = Path(opt.input_dir)
+OUTPUT_DIR = Path(opt.output_dir)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -148,7 +161,6 @@ if opt.gtr_rate_params is not None:
     # remove default to avoid confusion
     opt.mut_matrix = None
 
-EFFECTIVE_POP_SIZE = opt.eff_pop
 EXPONENTIAL_GROWTH_RATE = opt.exp_growth_rate if opt.exp_growth_rate is not None else float("-inf")
 BIRTH_RATE = opt.birth_rate if opt.birth_rate is not None else float("-inf")
 DEATH_RATE = opt.death_rate if opt.death_rate is not None else float("-inf")
@@ -197,14 +209,13 @@ DELETE_VCF_FILES = opt.delete_vcf
 # reference for cell coal command line parameters:
 # https://dapogon.github.io/cellcoal/cellcoal.manual.v1.1.html#67_parameter_file_name_at_the_command_line
 # Note the version in use is not the 1.1 version, but the 1.3 version with minor modifications.
-def params(user_genome_filename, newick_tree=None):
+def params(user_genome_filename, newick_tree):
     p = [
         CELLCOAL_BIN,
         "-s" + str(NCELLS_SAMPLE),
         "-n" + str(NUM_REPLICATES),
         "-l" + str(NUM_SITES),
         "-b" + str(int(ALPHABET_DNA)),
-        "-e" + str(EFFECTIVE_POP_SIZE),
         "-u" + str(SOMATIC_MUT_RATE),  # somatic mutation rate
         # "-d" + str(DELETION_RATE),
         # "-H" + str(COPY_NEUTRAL_LOH),
@@ -234,14 +245,10 @@ def params(user_genome_filename, newick_tree=None):
         "-Y",  # print true haplotypes to file
         "-x",  # print consensus/IUPAC haplotypes
         "-U" + user_genome_filename,
+        "-T" + str(newick_tree),
         # "-#" + str(SEED),
-        "-y0",
+        "-y1",
     ]
-    if newick_tree is not None:
-        # if omitted, cellcoal generates a random coalescent tree.
-        from pathlib import Path
-
-        p += ["-T" + str(Path(newick_tree).absolute())]
     if TRANSFORMING_BRANCH_LEN > 0.0:
         p += [
             "-k" + str(TRANSFORMING_BRANCH_LEN),
@@ -328,9 +335,23 @@ fasta_template = """> maternal
 {pat_genome}
 """
 
+# Discover existing tree directories from the input run
+_tree_dir_pattern = re.compile(r"^tree-(\d+)-files$")
+existing_tree_dirs = sorted(
+    d for d in INPUT_DIR.iterdir() if d.is_dir() and _tree_dir_pattern.match(d.name)
+)
+
+if opt.nsamples is not None:
+    existing_tree_dirs = existing_tree_dirs[: opt.nsamples]
+
+NUM_SAMPLES = len(existing_tree_dirs)
+if NUM_SAMPLES == 0:
+    print(f"No tree-*-files directories found in {INPUT_DIR}")
+    sys.exit(1)
+
 fill_width = max(1, math.ceil(np.log10(NUM_SAMPLES + 1)))
 
-for biopsy_number in range(NUM_SAMPLES):
+for biopsy_number, input_tree_dir in enumerate(existing_tree_dirs):
     print(f"Sample {biopsy_number} started", end=" ... ")
 
     # `FILENAME_PREFIX` a prefix for all generated files
@@ -352,11 +373,22 @@ for biopsy_number in range(NUM_SAMPLES):
     with open(fasta_filename, "w") as file:
         file.write(fasta_template.format(mat_genome=mat_genome, pat_genome=pat_genome))
 
-    # run cellcoal
-    print(params(str(fasta_filename)))
-    result = subprocess.run(params(str(fasta_filename)), cwd=OUTPUT_DIR, capture_output=True)
+    # use the ingroup-only tree from the prior run; cellcoal adds the outgroup/healthyTip itself.
+    # (absolute path needed since cellcoal runs with cwd=OUTPUT_DIR)
+    # tree-outgcell.nwk has numCells+1 leaves which overflows cellNames[] allocated for numCells.
+    input_tree_file = (input_tree_dir / "tree-no-outgcell.nwk").resolve()
+
+    # Run cellcoal with cwd=TREE_DIR so the fasta path is just the short filename.
+    # cellcoal's userGenomeFile/userTreeFile buffers are only 120 chars; absolute paths
+    # from OUTPUT_DIR overflow them. The tree path is absolute (input from another dir).
+    fasta_relname = fasta_filename.name
+    print(' '.join(params(fasta_relname, input_tree_file)))
+    result = subprocess.run(
+        params(fasta_relname, input_tree_file), cwd=TREE_DIR, capture_output=True
+    )
     log = result.stdout.decode("utf-8") + result.stderr.decode("utf-8")
-    if result.returncode > 0:
+    if result.returncode != 0:
+        print(f"cellcoal exited with code {result.returncode}")
         print("Log: '" + log + "'")
         sys.exit(result.returncode)
 
@@ -366,7 +398,7 @@ for biopsy_number in range(NUM_SAMPLES):
         if DELETE_VCF_FILES:
             print("removing vcf files", end=" ... ")
             try:
-                shutil.rmtree(OUTPUT_DIR / "Results" / "vcf_dir")
+                shutil.rmtree(TREE_DIR / "Results" / "vcf_dir")
             except FileNotFoundError as e:
                 print(e)
                 pass
@@ -374,7 +406,7 @@ for biopsy_number in range(NUM_SAMPLES):
 
     # get observed full genotypes:
     observed_sites_16_state = dict()
-    with open(OUTPUT_DIR / "Results" / "full_genotypes_dir" / "full_gen.0001") as file:
+    with open(TREE_DIR / "Results" / "full_genotypes_dir" / "full_gen.0001") as file:
         cell_count, num_sites = map(int, next(file).split())
         for line in file:
             cell_name, *genes = line.split()
@@ -382,7 +414,7 @@ for biopsy_number in range(NUM_SAMPLES):
 
     # copy the tree file
     shutil.copyfile(
-        OUTPUT_DIR / "Results" / "trees_dir" / "trees.0001", TREE_DIR / "tree-outgcell.nwk"
+        TREE_DIR / "Results" / "trees_dir" / "trees.0001", TREE_DIR / "tree-outgcell.nwk"
     )
 
     # make a tree file without the outgroup
@@ -392,9 +424,6 @@ for biopsy_number in range(NUM_SAMPLES):
         tree.prune([leaf for leaf in map(lambda lf: lf.name, tree.leaves()) if leaf != "outgcell"])
         file.write(tree.write())
         file.write("\n")
-
-    # save the Results folder
-    shutil.move(OUTPUT_DIR / "Results", TREE_DIR)
 
     # write nexus for genotypes
     with open(TREE_DIR / "16state.nex", "w") as file:
